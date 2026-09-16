@@ -2,7 +2,23 @@ import os
 import warnings
 import numpy as np
 from hd_mock_data import hd_data
-from . import utils, fisher, theory, mpi
+from . import utils, theory, mpi
+
+
+# =====================================================================
+# Updated SO covariance matrices.
+#
+# The CMB-HD covariance matrices come from hdMockData, which from v1.2
+# carries the lensed, delensed, and polarization-only-lensing versions.
+# hdMockData holds CMB-HD data only, so the updated SO covariance matrices
+# are read from `hdfisher/data/covmats` instead. The names below are what
+# `Data.cmb_covmat_fname` looks for when `exp='so'`; the older SO covmat
+# that ships with hdfisher is used only if they are absent.
+# =====================================================================
+SO_COVMAT_FNAMES = {
+    'lensed':   'so_v1.2_lmin30lmax5000lmaxTT3000Lmax3000_lensed_covmat.txt',
+    'delensed': 'so_v1.2_lmin30lmax5000lmaxTT3000Lmax3000_delensed_covmat.txt',
+}
 
 
 # create a custom warning category to always issue a warning about
@@ -140,10 +156,10 @@ class Data:
 
     # ----- functions that resturn file names of data: -----
 
-    def fiducial_param_file(self, feedback=False):
+    def fiducial_param_file(self, feedback=False, use_class=False):
         """Returns the name of the YAML file holding the fiduical cosmological
-        and accuracy parameters that are passed to CAMB when calculating the 
-        CMB and BAO theory.
+        and accuracy parameters that are passed to CAMB (or to CLASS) when
+        calculating the CMB and BAO theory.
 
         Parameters
         ----------
@@ -152,35 +168,68 @@ class Data:
             to `mead2020_feedback`, i.e. uses the HMCode 2020 + feedback
             non-linear model. Otherwise, the HMCode 2016 CDM-only model
             is used by setting `halofit_version` to `mead2016`.
+        use_class : bool, default=False
+            If `True`, returns the CLASS parameter file, which uses CLASS
+            parameter names and holds the CLASS accuracy settings used in
+            Cheslog et. al. (2026). There is no CLASS parameter file for
+            the baryonic feedback model, so `feedback=True` cannot be
+            combined with `use_class=True`.
 
         Returns
         -------
         fname : str
             The name of the parameter file, including its absolute path.
+
+        Raises
+        ------
+        ValueError
+            If both `feedback` and `use_class` are `True`.
         """
         fid_params_dir = self.data_path('fiducial_params')
-        fname = 'fiducial_params_feedback.yaml' if feedback else 'fiducial_params.yaml'
+        if use_class:
+            if feedback:
+                err_msg = "There is no CLASS parameter file for the baryonic feedback model: `feedback=True` cannot be used with `use_class=True`."
+                raise ValueError(err_msg)
+            fname = 'class_fiducial_params.yaml'
+        else:
+            fname = 'fiducial_params_feedback.yaml' if feedback else 'fiducial_params.yaml'
         return os.path.join(fid_params_dir, fname)
 
-    
-    def fiducial_fisher_steps_file(self, feedback=False):
-        """Returns the name of the YAML file holding the fiduical parameter 
+
+    def fiducial_fisher_steps_file(self, feedback=False, use_class=False):
+        """Returns the name of the YAML file holding the fiduical parameter
         step sizes used to calculate the Fisher matrices.
 
         Parameters
         ----------
         feedback : bool, default=False
-            If `True`, the file includes a step size for the HMCode 2020 
-            baryonic feedback parameter, `HMCode_logT_AGN`. Otherwise this 
+            If `True`, the file includes a step size for the HMCode 2020
+            baryonic feedback parameter, `HMCode_logT_AGN`. Otherwise this
             parameter is excluded.
+        use_class : bool, default=False
+            If `True`, returns the step size file that goes with the CLASS
+            parameter file, using CLASS parameter names. There is no CLASS
+            step size file for the baryonic feedback model, so
+            `feedback=True` cannot be combined with `use_class=True`.
 
         Returns
         -------
         fname : str
             The name of the file, including its absolute path.
+
+        Raises
+        ------
+        ValueError
+            If both `feedback` and `use_class` are `True`.
         """
         fid_steps_dir = self.data_path('fisher_step_sizes')
-        fname = 'fiducial_step_sizes_feedback.yaml' if feedback else 'fiducial_step_sizes.yaml'
+        if use_class:
+            if feedback:
+                err_msg = "There is no CLASS step size file for the baryonic feedback model: `feedback=True` cannot be used with `use_class=True`."
+                raise ValueError(err_msg)
+            fname = 'class_fiducial_step_sizes.yaml'
+        else:
+            fname = 'fiducial_step_sizes_feedback.yaml' if feedback else 'fiducial_step_sizes.yaml'
         return os.path.join(fid_steps_dir, fname)
 
 
@@ -668,8 +717,8 @@ class Data:
         return fname
 
 
-    def hd_covmat_fname(self, cmb_type='delensed', include_fg=True, 
-            hd_lmax=None):
+    def hd_covmat_fname(self, cmb_type='delensed', include_fg=True,
+            hd_lmax=None, pol_only_lensing=False):
         """Returns the name of the file holding the covariance matrix for the
         mock CMB-HD TT, TE, EE, BB and CMB lensing power spectra for the  
         the given CMB type (lensed or delensed).
@@ -696,18 +745,25 @@ class Data:
             Used to return CMB-HD covariance matrices that were calculated with 
             a lower maximum multipole than the baseline case. Only used when
             `cmb_type='delensed'`. Note that the covariance matrices with
-            `hd_lmax` < 20100 were only calculated for the original HD data 
+            `hd_lmax` < 20100 were only calculated for the original HD data
             version, `'v1.0'`.
+        pol_only_lensing : bool, default=False
+            If `True`, return the covariance matrix calculated with only the
+            EE and EB estimators used for the lensing reconstruction, instead
+            of the minimum-variance combination. Only available for
+            `hd_data_version` >= `'v1.2'`, and only when the covariance matrix
+            comes from hdMockData (i.e. `include_fg=True` and the full
+            `hd_lmax`).
 
         Returns
         -------
         fname : str
             The name of the file that contains the requested covariance matrix.
-        
+
         Raises
         ------
-        ValueError 
-            If either the value of `hd_lmax` is invalid, or if the requested 
+        ValueError
+            If either the value of `hd_lmax` is invalid, or if the requested
             covariance matrix does not exist.
 
         Warns
@@ -747,9 +803,15 @@ class Data:
         # finally, get the file name:
         # if including FG and `hd_lmax` = 20k, get the correct version:
         if include_fg and (hd_lmax >= self.lmaxs['hd']):
-            fname = self.hd_datalib.block_covmat_fname(cmb_type)
+            fname = self.hd_datalib.block_covmat_fname(
+                    cmb_type, pol_only_lensing=pol_only_lensing)
         # otherwise, get the original file:
         else:
+            if pol_only_lensing:
+                err_msg = ("`pol_only_lensing=True` is only available for the "
+                       "covariance matrices from hdMockData, which require "
+                       "`include_fg=True` and the full `hd_lmax`.")
+                raise ValueError(err_msg)
             extra_info = '' if include_fg else '_nofg'
             ell_info = f'lmin{lmin}lmax{lmax}lmaxTT{lmaxTT}Lmax{Lmax}'
             fname = os.path.join(self.data_path('covmats'), f'hd{extra_info}_fsky0pt6_{ell_info}_binned_{cmb_type}_cov.txt')
@@ -759,8 +821,8 @@ class Data:
         return fname
 
 
-    def cmb_covmat_fname(self, exp, cmb_type='delensed', include_fg=True, 
-            hd_lmax=None):
+    def cmb_covmat_fname(self, exp, cmb_type='delensed', include_fg=True,
+            hd_lmax=None, pol_only_lensing=False):
         """Returns the name of the file holding the covariance matrix for the
         mock CMB TT, TE, EE, BB and CMB lensing power spectra corresponding to 
         the given experimental configuration and CMB type (lensed or delensed).
@@ -791,8 +853,13 @@ class Data:
             Used to return CMB-HD covariance matrices that were calculated with 
             a lower maximum multipole than the baseline case. Only used when
             `exp='hd'` and `cmb_type='delensed'`. Note that the covariance
-            matrices with `hd_lmax` < 20100 were only calculated for the 
+            matrices with `hd_lmax` < 20100 were only calculated for the
             original HD data version, `'v1.0'`.
+        pol_only_lensing : bool, default=False
+            If `True`, return the covariance matrix calculated with only the
+            EE and EB estimators used for the lensing reconstruction. Used
+            only when `exp='hd'`, and only available for `hd_data_version`
+            >= `'v1.2'`.
 
         Returns
         -------
@@ -816,26 +883,30 @@ class Data:
         exp = self.check_cmb_exp(exp)
         cmb_type = cmb_type.lower()
         if exp == 'hd':
-            fname = self.hd_covmat_fname(cmb_type=cmb_type, include_fg=include_fg, hd_lmax=hd_lmax)
+            fname = self.hd_covmat_fname(cmb_type=cmb_type, include_fg=include_fg,
+                    hd_lmax=hd_lmax, pol_only_lensing=pol_only_lensing)
         else:
-            if (hd_lmax is not None) or (not include_fg):
-                msg = f"Ignoring the `hd_lmax` and `include_fg` arguments for `exp = '{exp}'`."
+            if (hd_lmax is not None) or (not include_fg) or pol_only_lensing:
+                msg = (f"Ignoring the `hd_lmax`, `include_fg` and `pol_only_lensing` "
+                       f"arguments for `exp = '{exp}'`.")
                 warnings.warn(msg)
-            # check if we have the requested covmat:
-            if cmb_type != 'delensed':
-                err_msg = f"Invalid `cmb_type`. You must pass `cmb_type = 'delensed'` for `exp = '{exp}'`."
+            if cmb_type not in ['lensed', 'delensed']:
+                err_msg = f"Invalid `cmb_type`: `'{cmb_type}'`. The options are `'lensed'` or `'delensed'`."
                 raise ValueError(err_msg)
-            # get info for the file name:
-            lmin = self.lmins[exp]
-            lmax = self.lmaxs[exp]
-            lmaxTT = self.lmaxsTT[exp]
-            Lmax = self.Lmaxs[exp]
-            # get the file name
-            ell_info = f'lmin{lmin}lmax{lmax}lmaxTT{lmaxTT}Lmax{Lmax}'
-            fname = os.path.join(self.data_path('covmats'), f'{exp}_fsky0pt6_{ell_info}_binned_{cmb_type}_cov.txt')
-        if not os.path.exists(fname):
-            msg = f"The requested file {fname} does not exist."
-            warnings.warn(msg)
+            # `HDFISHER_COVMAT_DIR` lets the updated covmats live outside the
+            # package, so a reinstall does not wipe them.
+            covmat_dir = os.environ.get('HDFISHER_COVMAT_DIR',
+                                        self.data_path('covmats'))
+            fname = os.path.join(covmat_dir, SO_COVMAT_FNAMES[cmb_type])
+            if not os.path.exists(fname):
+                present = (sorted(f for f in os.listdir(covmat_dir)
+                                  if f.startswith(exp))
+                           if os.path.isdir(covmat_dir) else [])
+                raise FileNotFoundError(
+                    f"No {cmb_type} covariance matrix for `exp = '{exp}'`.\n"
+                    f"  looked for      : {fname}\n"
+                    f"  directory exists: {os.path.isdir(covmat_dir)}\n"
+                    f"  '{exp}*' files there: {present}\n")
         return fname
 
 
@@ -1050,7 +1121,7 @@ class Data:
             If an unrecognized `cmb_type` was passed.
         """
         fname = self.example_hd_fisher_fname(cmb_type=cmb_type, use_H0=use_H0, with_desi=with_desi)
-        fisher_matrix, fisher_params = fisher.load_fisher_matrix(fname)
+        fisher_matrix, fisher_params = utils.load_fisher_matrix(fname)
         return fisher_matrix, fisher_params
 
 
@@ -1515,8 +1586,8 @@ class Data:
         return ells, coadd_fg_cls
 
 
-    def load_cmb_covmat(self, exp, cmb_type='delensed', include_fg=True, 
-            hd_lmax=None):
+    def load_cmb_covmat(self, exp, cmb_type='delensed', include_fg=True,
+            hd_lmax=None, pol_only_lensing=False):
         """Returns the covariance matrix for the mock CMB TT, TE, EE, BB and 
         CMB lensing power spectra corresponding to the given experimental 
         configuration and CMB type (lensed or delensed).
@@ -1579,7 +1650,8 @@ class Data:
         --------
         dataconfig.Data.cmb_covmat_fname
         """
-        fname = self.cmb_covmat_fname(exp, cmb_type=cmb_type, include_fg=include_fg, hd_lmax=hd_lmax)
+        fname = self.cmb_covmat_fname(exp, cmb_type=cmb_type, include_fg=include_fg,
+                hd_lmax=hd_lmax, pol_only_lensing=pol_only_lensing)
         covmat = np.loadtxt(fname)
         return covmat
 
@@ -1644,7 +1716,7 @@ class Data:
             in the same order as their corresponding rows/columns.
         """
         fname = self.precomputed_desi_fisher_fname(use_H0=use_H0)
-        fisher_matrix, fisher_params = fisher.load_fisher_matrix(fname)
+        fisher_matrix, fisher_params = utils.load_fisher_matrix(fname)
         return fisher_matrix, fisher_params
 
 
@@ -1724,7 +1796,7 @@ class Data:
         dataconfig.Data.precomputed_cmb_fisher_fname
         """
         fname = self.precomputed_cmb_fisher_fname(exp, cmb_type=cmb_type, use_H0=use_H0, with_desi=with_desi, hd_lmax=hd_lmax, include_fg=include_fg, feedback=feedback)
-        fisher_matrix, fisher_params = fisher.load_fisher_matrix(fname)
+        fisher_matrix, fisher_params = utils.load_fisher_matrix(fname)
         return fisher_matrix, fisher_params
 
 

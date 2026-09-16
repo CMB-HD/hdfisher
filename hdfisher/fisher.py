@@ -458,46 +458,11 @@ def calc_bao_fisher(bao_cov, derivs, params, priors=None, fname=None):
 
 # other useful functions:
 
-def save_fisher_matrix(fname, fisher_matrix, params):
-    """Save the Fisher matrix to the given file, with a header giving the 
-    parameter names in the correct order.
-
-    Parameters
-    ----------
-    fname : str
-        The file name (including absolute path) to save the Fisher matrix to.
-    fisher_matrix : array_like of float
-        The two-dimensional Fisher matrix.
-    params : list of str
-        A list of parameter names, in the same order as in the Fisher matrix.
-    """
-    header = ' '.join(params)
-    np.savetxt(fname, fisher_matrix, header=header)
-
-
-def load_fisher_matrix(fname):
-    """Returns the Fisher matrix loaded from the given file, with a list of 
-    parameter names in the correct order.
-
-    Parameters
-    ----------
-    fname : str
-        The file name (including absolute path) to save the Fisher matrix to.
-
-    Returns
-    -------
-    fisher_matrix : array_like of float
-        The two-dimensional Fisher matrix.
-    params : list of str
-        A list of parameter names, in the same order as in the Fisher matrix.
-    """
-    fisher_matrix = np.loadtxt(fname)
-    # read the header to get the params
-    with open(fname, 'r') as f:
-        header = f.readline()
-    header = header.strip('# \n')
-    params = header.split(' ')
-    return fisher_matrix, params
+# `save_fisher_matrix` and `load_fisher_matrix` now live in `utils` (so that
+# `dataconfig` can use them without importing `fisher`, which would create a
+# circular import). They are re-exported here for backwards compatibility:
+save_fisher_matrix = utils.save_fisher_matrix
+load_fisher_matrix = utils.load_fisher_matrix
 
 
 def get_fisher_errors(fisher_matrix, params, fname=None):
@@ -520,7 +485,7 @@ def get_fisher_errors(fisher_matrix, params, fname=None):
         holding the error bar for that parameter.
     """
     cov = np.linalg.inv(fisher_matrix.copy())
-    errs = np.sqrt(np.diag(cov))
+    errs = np.sqrt((np.diag(cov)))
     errors = {}
     for i, param in enumerate(params):
         errors[param] = float(errs[i]) # convert from numpy dtype, for yaml saving
@@ -693,10 +658,10 @@ class Fisher:
     and BAO covariance matrices provided with `hdfisher`.
     """
     
-    def __init__(self, fisher_dir, exp='hd', overwrite=False, param_file=None, 
-            fisher_steps_file=None, feedback=False, fisher_params=None, 
-            use_H0=False, hd_lmax=None, include_fg=True, 
-            hd_data_version='latest'):
+    def __init__(self, fisher_dir, exp='hd', overwrite=False, param_file=None,
+        fisher_steps_file=None, feedback=False, fisher_params=None,
+        use_H0=False, hd_lmax=None, include_fg=True,
+        hd_data_version='latest', use_class=False, pol_only_lensing=False):
         """Initialization for a given experimental configuration and set
         of parameters to be included in the Fisher matrix.
 
@@ -744,7 +709,7 @@ class Fisher:
             + feedback non-linear model to use for the theory calculation, and 
             includes a fiducial value for its feedback parameter, with a step
             size given in the default `fisher_steps_file`. If `False`, the
-            CDM-only model with HMCode2016 is used.
+            CDM-only model with HMCode2016 is used. Not available with `use_class=True`.
         fisher_params : None or list of str, default=None
             An optional list of parameter names to use in the calculation,
             which must be a sub-set of the parameters in the 
@@ -779,6 +744,25 @@ class Fisher:
             the latest version is used. To reproduce the results in
             MacInnis et. al. (2023), use `hd_data_version='v1.0'`.
             See the `hdMockData` repository for a list of versions.
+        use_class : bool, default=False
+            If `True`, the theory is calculated with CLASS instead of CAMB,
+            and the `param_file` and `fisher_steps_file` must use CLASS
+            parameter names. If they are not given, the default CLASS
+            files `class_fiducial_params.yaml` and
+            `class_fiducial_step_sizes.yaml` are used, which hold the
+            CLASS settings of Cheslog et. al. (2026); see
+            `dataconfig.Data.fiducial_param_file`. NOTE that CLASS must
+            be modified as described in Appendix A of that work before
+            it can be used (a warning is issued as a reminder), and that
+            delensed spectra are not calculated with CLASS: no delensed
+            derivatives are produced, and a Fisher matrix cannot be
+            calculated from delensed spectra.
+        pol_only_lensing : bool, default=False
+            If `True`, use the CMB-HD covariance matrix that was calculated
+            with only the EE and EB estimators for the lensing
+            reconstruction, instead of the minimum-variance combination.
+            Only used when `exp='hd'`, and only available for
+            `hd_data_version` >= `'v1.2'`.
 
         Raises
         ------
@@ -860,11 +844,12 @@ class Fisher:
         hd_Lmax = self.Lmax if (self.exp == 'hd') else None
         _, self.nlkk = self.datalib.load_cmb_lensing_noise_spectrum(self.exp, include_fg=self.include_fg, hd_Lmax=hd_Lmax)
         # get the fiducial parameter values and step sizes:
+        self.use_class = use_class
         self.param_file = param_file
         if self.param_file is None:
-            self.param_file = self.get_param_file(feedback=feedback)
+            self.param_file = self.get_param_file(feedback=feedback, use_class=self.use_class)
         if fisher_steps_file is None:
-            fisher_steps_file = self.get_fisher_steps_file(feedback=feedback)
+            fisher_steps_file = self.get_fisher_steps_file(feedback=feedback, use_class=self.use_class)
         self.fid_params, self.step_sizes = get_param_info(self.param_file, fisher_steps_file)
         mpi.comm.barrier()
         # create the output directories, and save a copy of the input param 
@@ -896,11 +881,25 @@ class Fisher:
         for param in step_size_keys:
             if param not in self.fisher_params:
                 self.step_sizes.pop(param, None)
-
+        if self.use_class:
+            # delensed spectra are not calculated with CLASS, so drop them from
+            #  the list of CMB types used to calculate the derivatives. NOTE
+            #  that this mutates the `Data` instance held by this `Fisher`
+            #  instance only:
+            self.datalib.cmb_types = ['lensed', 'unlensed']
+            msg = "`use_class=True`: delensed spectra are not calculated with CLASS. No delensed derivatives will be calculated, and a Fisher matrix cannot be calculated from delensed spectra. Use `cmb_type='lensed'`, or set `use_class=False` to use CAMB."
+            warnings.warn(msg)
+            # CLASS must be modified before it can be used at all; remind
+            #  the user every time, since the failure is not obvious:
+            warnings.warn(theory.CLASS_MODIFICATION_WARNING)
+        # Which CMB-HD lensing reconstruction the covariance matrix assumes:
+        # the minimum-variance combination by default, or the EE/EB-only
+        # reconstruction if `pol_only_lensing=True`.
+        self.pol_only_lensing = pol_only_lensing
 
     # functions called during initialization:
 
-    def get_param_file(self, feedback=False):
+    def get_param_file(self, feedback=False, use_class=False):
         """Returns the file name of the YAML file that contains the fiducial
         cosmological parameter names and values, and any other CAMB settings,
         if no `param_file` was given during initialization.
@@ -910,11 +909,11 @@ class Fisher:
         if os.path.exists(input_param_file) and (not self.overwrite):
             param_file = input_param_file
         else:
-            param_file = self.datalib.fiducial_param_file(feedback=feedback)
+            param_file = self.datalib.fiducial_param_file(feedback=feedback, use_class=use_class)
         return param_file
 
 
-    def get_fisher_steps_file(self, feedback=False):
+    def get_fisher_steps_file(self, feedback=False, use_class=False):
         """Returns the file name of the YAML file that contains the parameter
         step sizes to be used when calculating the derivatives of the theory,
         if no `fisher_steps_file` was given during initialization.
@@ -924,7 +923,7 @@ class Fisher:
         if os.path.exists(input_steps_file) and (not self.overwrite):
             fisher_steps_file = input_steps_file
         else:
-            fisher_steps_file = self.datalib.fiducial_fisher_steps_file(feedback=feedback)
+            fisher_steps_file = self.datalib.fiducial_fisher_steps_file(feedback=feedback, use_class=use_class)
         return fisher_steps_file
 
 
@@ -1044,6 +1043,40 @@ class Fisher:
                 self.calculate_deriv(param)
 
 
+    def _make_theory(self, param, **cosmo_params):
+        """Construct and return the `theory.Theory` instance used to compute
+        the spectra when `param` is varied away from its fiducial value.
+
+        This is the extension point for the theory construction: subclasses
+        (e.g. hdInitPk's `BinnedPkFisher`) can override this single method to
+        return a different `Theory` subclass, or to pass extra arguments
+        (e.g. the varied parameter name, k-bin edges, or kSZ template
+        parameters), without re-implementing the bookkeeping in
+        `Fisher.calculate_theory_for_deriv`.
+
+        Parameters
+        ----------
+        param : str or None
+            The name of the parameter being varied, or `None` for the
+            fiducial theory. The base class does not use it; it is provided
+            for subclasses whose theory calculation depends on which
+            parameter is being stepped.
+        **cosmo_params : dict
+            Parameter overrides passed through to `theory.Theory`; contains
+            `{param: value}` when a parameter is being varied.
+
+        Returns
+        -------
+        theolib : theory.Theory
+            The (not yet computed) theory object for this parameter step.
+        """
+        return theory.Theory(self.lmax, self.theo_dir,
+                       param_file=self.param_file, nlkk=self.nlkk,
+                       recon_lmin=self.Lmin, recon_lmax=self.Lmax,
+                       use_H0=self.use_H0, use_class=self.use_class,
+                       **cosmo_params)
+
+
     def calculate_theory_for_deriv(self, param, value):
         """Calculate and save the CMB and BAO theory when the `param` has 
         the given `value`, with the other parameters fixed to their 
@@ -1052,21 +1085,21 @@ class Fisher:
         # will pass the `cosmo_params` dict to the `theory.Theory` class, to
         #  overide the param value from its fiducial value; we also keep track
         #  of which way the parameter is varied to use in the output file name:
-        if param is None: # fiducial case
+        if param is None:
             cosmo_params = {}
             step_direction = None
         else:
-            cosmo_params = {param: value}
             step_direction = 'up' if (value > self.fid_params[param]) else 'down'
-            if param == 'logA': # set 'As' to `None`, so 'logA' is actually used
+            cosmo_params = {param: value}
+            if param == 'logA':
                 cosmo_params['As'] = None
         # do the calculation:
-        theolib = theory.Theory(self.lmax, self.theo_dir, param_file=self.param_file, nlkk=self.nlkk, recon_lmin=self.Lmin, recon_lmax=self.Lmax, use_H0=self.use_H0, **cosmo_params)
+        theolib = self._make_theory(param, **cosmo_params)
         cmb_theo = theolib.get_theory(save=False)
         rs_dv = theolib.get_rs_dv(self.z, save=False)
         # save the theory
         header_info = f'{param} = {value}\n'
-        for cmb_type in self.datalib.cmb_types:
+        for cmb_type in cmb_theo.keys():
             cmb_theo_fname = config.fisher_cmb_theo_fname(self.theo_dir, cmb_type, param, step_direction, use_H0=self.use_H0)
             utils.save_to_file(cmb_theo_fname, cmb_theo[cmb_type], keys=self.datalib.theo_cols, extra_header_info=header_info)
         bao_theo_fname = config.fisher_bao_theo_fname(self.theo_dir,  param, step_direction, use_H0=self.use_H0)
@@ -1090,6 +1123,10 @@ class Fisher:
         utils.save_to_file(bao_fname, {'z': z, 'rs_dv': rs_dv_deriv}, keys=['z', 'rs_dv'], extra_header_info=header_info)
         # CMB:
         for cmb_type in self.datalib.cmb_types:
+            # NOTE: when `use_class=True`, 'delensed' has already been removed
+            #  from `self.datalib.cmb_types` during initialization
+            if self.use_class and (cmb_type == 'delensed'):
+                continue
             cmb_theo_up_fname = config.fisher_cmb_theo_fname(self.theo_dir, cmb_type, param, 'up', use_H0=self.use_H0)
             cmb_theo_up = utils.load_from_file(cmb_theo_up_fname, self.datalib.theo_cols)
             cmb_theo_down_fname = config.fisher_cmb_theo_fname(self.theo_dir, cmb_type, param, 'down', use_H0=self.use_H0)
@@ -1098,7 +1135,9 @@ class Fisher:
             for s in self.datalib.cov_spectra:
                 cmb_derivs[s] = (cmb_theo_up[s] - cmb_theo_down[s]) / delta_param
             cmb_fname = config.fisher_cmb_deriv_fname(self.derivs_dir, cmb_type, param, use_H0=self.use_H0)
-            utils.save_to_file(cmb_fname, cmb_derivs, keys=self.datalib.theo_cols,  extra_header_info=header_info)
+            utils.save_to_file(cmb_fname, cmb_derivs, keys=self.datalib.theo_cols, extra_header_info=header_info)
+
+
 
 
     # functions to calculate the Fisher matrix:
@@ -1188,6 +1227,35 @@ class Fisher:
         return z, derivs
 
     
+    def _load_cmb_covmat_for_fisher(self, cmb_type):
+        """Load the binned CMB covariance matrix used to assemble the Fisher
+        matrix for the given `cmb_type`.
+
+        This is the extension point for the covariance-matrix choice:
+        subclasses (e.g. hdInitPk's `BinnedPkFisher`) can override this
+        single method to load a different covariance matrix, without
+        re-implementing the parameter handling in `Fisher.calc_cmb_fisher`.
+        Note that the covariance matrix must be binned consistently with the
+        derivatives returned by `Fisher.load_cmb_fisher_derivs` (with
+        `binned=True`), i.e. with the binning defined by `self.ell_ranges`
+        and the bin edges from `hdMockData`.
+
+        Parameters
+        ----------
+        cmb_type : str
+            The type of CMB spectra: `'lensed'` or `'delensed'`.
+
+        Returns
+        -------
+        cmb_covmat : array_like of float
+            The two-dimensional binned covariance matrix.
+        """
+        hd_lmax = self.lmax if (self.exp == 'hd') else None
+        return self.datalib.load_cmb_covmat(
+                self.exp, cmb_type=cmb_type, include_fg=self.include_fg,
+                hd_lmax=hd_lmax, pol_only_lensing=self.pol_only_lensing)
+
+
     def calc_cmb_fisher(self, cmb_type, params=None, priors=None, use_H0=None, save=False, fname=None):
         """Calculate the Fisher matrix for the given set of `params` using the
         covariance matrix for the CMB spectra of the given `cmb_type` and the
@@ -1241,6 +1309,9 @@ class Fisher:
             or if the mock CMB covariance matrix for the requested `cmb_type` 
             does not exist, based on the experimental configuration set
             during initialization.
+            
+            If `use_class=True` and `cmb_type` is `'delensed'`, since
+            delensed spectra are not calculated with CLASS.
 
         See also
         --------
@@ -1251,15 +1322,18 @@ class Fisher:
         if save and (fname is None):
             err_msg = f"You set `save=True` but `fname` is None: you must provide a file name, `fname`, that will be used to save the Fisher matrix in the directory `{self.fmat_dir}`."
             raise ValueError(err_msg)
+        if self.use_class and ('delens' in cmb_type.lower()):
+            err_msg = f"You passed `cmb_type = '{cmb_type}'`, but delensed spectra are not calculated with CLASS (`use_class=True`), so no delensed derivatives exist. Use `cmb_type = 'lensed'`, or re-initialize the `Fisher` class with `use_class=False`."
+            raise ValueError(err_msg)
         self.check_H0_theta()
         _, derivs = self.load_cmb_fisher_derivs(cmb_types=[cmb_type], binned=True, use_H0=use_H0)
-        hd_lmax = self.lmax if (self.exp == 'hd') else None
-        cmb_covmat = self.datalib.load_cmb_covmat(self.exp, cmb_type=cmb_type, include_fg=self.include_fg, hd_lmax=hd_lmax)
+        cmb_covmat = self._load_cmb_covmat_for_fisher(cmb_type)
         if params is None:
             params = self.fisher_params.copy()
         has_H0 = 'H0' in params
         has_theta = ('theta' in params) or ('cosmomc_theta' in params)
         if has_H0 and has_theta:
+            theta_key = 'theta' if ('theta' in params) else 'cosmomc_theta'
             err_msg = f"Both 'H0' and '{theta_key}' are in `params`: only one can be used."
             raise ValueError(err_msg)
         elif use_H0 and has_theta:
@@ -1344,6 +1418,7 @@ class Fisher:
         has_H0 = 'H0' in params
         has_theta = ('theta' in params) or ('cosmomc_theta' in params)
         if has_H0 and has_theta:
+            theta_key = 'theta' if ('theta' in params) else 'cosmomc_theta'
             err_msg = f"Both 'H0' and '{theta_key}' are in `params`: only one can be used."
             raise ValueError(err_msg)
         elif use_H0 and has_theta:
@@ -1362,7 +1437,7 @@ class Fisher:
             fisher_fname = os.path.join(self.fmat_dir, fname)
         else:
             fisher_fname = None
-        fisher_matrix = calc_bao_fisher(bao_covmat, derivs, params, priors=priors, fname=fname)
+        fisher_matrix = calc_bao_fisher(bao_covmat, derivs, params, priors=priors, fname=fisher_fname)
         return fisher_matrix.copy(), params.copy()
         
     
@@ -1569,4 +1644,3 @@ class Fisher:
         """
         fisher_matrix, fisher_params = self.datalib.load_example_hd_fisher(cmb_type=cmb_type, use_H0=use_H0, with_desi=with_desi)
         return fisher_matrix, fisher_params
-
