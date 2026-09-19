@@ -404,7 +404,7 @@ def calc_cmb_fisher(cmb_cov, derivs, params, spectra=['tt', 'te', 'ee', 'bb', 'k
                 if (i == j) and (p1 in priors.keys()):
                     fisher_matrix[i, i] += (1. / priors[p1]**2)
     if fname is not None:
-        save_fisher_matrix(fname, fisher_matrix, params)
+        utils.save_fisher_matrix(fname, fisher_matrix, params)
     return fisher_matrix
 
 
@@ -451,7 +451,7 @@ def calc_bao_fisher(bao_cov, derivs, params, priors=None, fname=None):
                 if (i == j) and (p1 in priors.keys()):
                     fisher_matrix[i, i] += (1. / priors[p1]**2)
     if fname is not None:
-        save_fisher_matrix(fname, fisher_matrix, params)
+        utils.save_fisher_matrix(fname, fisher_matrix, params)
     return fisher_matrix
 
 
@@ -459,44 +459,31 @@ def calc_bao_fisher(bao_cov, derivs, params, priors=None, fname=None):
 # other useful functions:
 
 def save_fisher_matrix(fname, fisher_matrix, params):
-    """Save the Fisher matrix to the given file, with a header giving the 
-    parameter names in the correct order.
+    """Save the Fisher matrix. 
 
-    Parameters
-    ----------
-    fname : str
-        The file name (including absolute path) to save the Fisher matrix to.
-    fisher_matrix : array_like of float
-        The two-dimensional Fisher matrix.
-    params : list of str
-        A list of parameter names, in the same order as in the Fisher matrix.
+    See Also
+    --------
+    utils.save_fisher_matrix
+
+    Notes
+    -----
+    This function is defined here for backwards compatibility.
     """
-    header = ' '.join(params)
-    np.savetxt(fname, fisher_matrix, header=header)
+    utils.save_fisher_matrix(fname, fisher_matrix, params)
 
 
 def load_fisher_matrix(fname):
-    """Returns the Fisher matrix loaded from the given file, with a list of 
-    parameter names in the correct order.
+    """Load a Fisher matrix and a list of corresponding parameter names.
 
-    Parameters
-    ----------
-    fname : str
-        The file name (including absolute path) to save the Fisher matrix to.
+    See Also
+    --------
+    utils.load_fisher_matrix
 
-    Returns
-    -------
-    fisher_matrix : array_like of float
-        The two-dimensional Fisher matrix.
-    params : list of str
-        A list of parameter names, in the same order as in the Fisher matrix.
+    Notes
+    -----
+    This function is defined here for backwards compatibility.
     """
-    fisher_matrix = np.loadtxt(fname)
-    # read the header to get the params
-    with open(fname, 'r') as f:
-        header = f.readline()
-    header = header.strip('# \n')
-    params = header.split(' ')
+    fisher_matrix, params = utils.load_fisher_matrix(fname)
     return fisher_matrix, params
 
 
@@ -1260,6 +1247,7 @@ class Fisher:
         has_H0 = 'H0' in params
         has_theta = ('theta' in params) or ('cosmomc_theta' in params)
         if has_H0 and has_theta:
+            theta_key = 'theta' if ('theta' in params) else 'cosmomc_theta'
             err_msg = f"Both 'H0' and '{theta_key}' are in `params`: only one can be used."
             raise ValueError(err_msg)
         elif use_H0 and has_theta:
@@ -1344,6 +1332,7 @@ class Fisher:
         has_H0 = 'H0' in params
         has_theta = ('theta' in params) or ('cosmomc_theta' in params)
         if has_H0 and has_theta:
+            theta_key = 'theta' if ('theta' in params) else 'cosmomc_theta'
             err_msg = f"Both 'H0' and '{theta_key}' are in `params`: only one can be used."
             raise ValueError(err_msg)
         elif use_H0 and has_theta:
@@ -1362,7 +1351,7 @@ class Fisher:
             fisher_fname = os.path.join(self.fmat_dir, fname)
         else:
             fisher_fname = None
-        fisher_matrix = calc_bao_fisher(bao_covmat, derivs, params, priors=priors, fname=fname)
+        fisher_matrix = calc_bao_fisher(bao_covmat, derivs, params, priors=priors, fname=fisher_fname)
         return fisher_matrix.copy(), params.copy()
         
     
@@ -1442,7 +1431,7 @@ class Fisher:
         if fname is not None:
             fisher_fname = os.path.join(self.fmat_dir, fname)
             if os.path.exists(fisher_fname) and (not self.overwrite):
-                fisher_matrix, fisher_params = load_fisher_matrix(fisher_fname)
+                fisher_matrix, fisher_params = utils.load_fisher_matrix(fisher_fname)
                 calc_fisher = False
         if calc_fisher:
             if with_desi:
@@ -1453,7 +1442,7 @@ class Fisher:
                 fisher_matrix, fisher_params = self.calc_cmb_fisher(cmb_type, params=params, priors=priors, use_H0=use_H0, save=False)
             if save and (mpi.rank == 0):
                 fisher_fname = os.path.join(self.fmat_dir, fname)
-                save_fisher_matrix(fisher_fname, fisher_matrix, fisher_params)
+                utils.save_fisher_matrix(fisher_fname, fisher_matrix, fisher_params)
         return fisher_matrix, fisher_params
 
 

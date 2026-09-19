@@ -3,6 +3,79 @@ import warnings
 import numpy as np
 from . import utils
 
+
+def data_path(relative_path):
+    """Absolute path to a file provided with the `hdfisher` package
+    (i.e., a file in the `hdfisher/data/` directory of the `hdfisher`
+    repository), or a directory containing such files.
+
+    Parameters
+    ----------
+    relative_path : str
+        The path to a file or directory, relative to the `data`
+        directory. E.g., the `relative_path` of the "readme" file in the
+        `data` directory is `'README.md'`.
+
+    Returns
+    -------
+    absolute_path : str
+        The absolute path to the file or directory.
+    """
+    data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data/')
+    absolute_path = os.path.join(data_dir, relative_path)
+    return absolute_path
+
+
+def fiducial_param_file(feedback=False):
+    """Absolute path to the YAML file holding the fiduical parameters
+    (including cosmological and accuracy parameters) passed to CAMB when
+    calculating the CMB and BAO theory.
+
+    Parameters
+    ----------
+    feedback : bool, default=False
+        If `True`, the parameter file sets the CAMB `halofit_version`
+        to `mead2020_feedback`, i.e. uses the HMCode 2020 + baryonic
+        feedback non-linear model. Otherwise, the HMCode 2016 CDM-only
+        model is used by setting `halofit_version` to `mead2016`.
+
+    Returns
+    -------
+    fname : str
+        The absolute path to the file.
+
+    Notes
+    -----
+    The parameter file does not contain `lmax`.
+    """
+    fid_params_dir = data_path('fiducial_params')
+    feedback_info = '_feedback' if feedback else ''
+    fname = os.path.join(fid_params_dir, f'fiducial_params{feedback_info}.yaml')
+    return fname
+
+
+def fiducial_fisher_steps_file(feedback=False):
+    """Absolute path to the YAML file holding the fiduical parameter step
+    sizes used to calculate the Fisher matrices.
+
+    Parameters
+    ----------
+    feedback : bool, default=False
+        If `True`, the file includes a step size for the HMCode 2020
+        baryonic feedback parameter, `HMCode_logT_AGN`. Otherwise this
+        parameter is excluded.
+
+    Returns
+    -------
+    fname : str
+        The absolute path to the file.
+    """
+    fid_steps_dir = data_path('fisher_step_sizes')
+    feedback_info = '_feedback' if feedback else ''
+    fname = os.path.join(fid_steps_dir, f'fiducial_step_sizes{feedback_info}.yaml')
+    return fname
+
+
 def camb_theo_fnames(theo_dir, theo_root=None, mkdir=False):
     """Returns a dictionary containing file names used to save the CAMB theory.
     

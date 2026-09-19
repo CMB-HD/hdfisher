@@ -5,7 +5,7 @@ from copy import deepcopy
 import numpy as np
 import yaml
 import camb
-from . import mpi, utils, config, dataconfig
+from . import mpi, utils, config
 
 
 # ----- cosmological parameters: -----
@@ -56,8 +56,7 @@ def get_params(param_file=None):
     """
     if param_file is None:
         # get the fiducial parameter file
-        data = dataconfig.Data()
-        param_file = data.fiducial_param_file()
+        param_file = config.fiducial_param_file()
     if not os.path.exists(param_file):
         param_set_dir, param_set_fname = os.path.split(param_file)
         if len(param_set_dir) > 1:
@@ -156,7 +155,7 @@ def set_cosmo_params(param_file=None, use_H0=False, **cosmo_params):
     if 'HMCode_logT_AGN' not in p:
         if 'logTagn' in p:
             p['HMCode_logT_AGN'] = p['logTagn']
-            p.pop(p['logTagn'], None)
+            p.pop('logTagn', None)
         else:
             p['HMCode_logT_AGN'] = 7.8
     return p
@@ -215,7 +214,7 @@ def get_bao_rs_dv(camb_params, z, camb_results=None):
     rs_dv : array_like of float
         The values of r_s/d_V(z) for each redshift in `z`.
     """
-    rs_dv = results.get_BAO(z, camb_params)[:,0]
+    rs_dv = camb_results.get_BAO(z, camb_params)[:,0]
     return rs_dv
 
 

@@ -210,6 +210,56 @@ def set_dir(dirname):
     return dirname
 
 
+def save_fisher_matrix(fname, fisher_matrix, params):
+    """Save the Fisher matrix to the given file, with a header giving the
+    parameter names in the correct order.
+
+    Parameters
+    ----------
+    fname : str
+        The file name (including absolute path) to save the Fisher matrix to.
+    fisher_matrix : array_like of float
+        The two-dimensional Fisher matrix.
+    params : list of str
+        A list of parameter names, in the same order as in the Fisher matrix.
+
+    See Also
+    --------
+    load_fisher_matrix
+    """
+    header = ' '.join(params)
+    np.savetxt(fname, fisher_matrix, header=header)
+
+
+def load_fisher_matrix(fname):
+    """Returns the Fisher matrix loaded from the given file, with a list of
+    parameter names in the correct order.
+
+    Parameters
+    ----------
+    fname : str
+        The file name (including absolute path) to save the Fisher matrix to.
+
+    Returns
+    -------
+    fisher_matrix : array_like of float
+        The two-dimensional Fisher matrix.
+    params : list of str
+        A list of parameter names, in the same order as in the Fisher matrix.
+    
+    See Also
+    --------
+    save_fisher_matrix
+    """
+    fisher_matrix = np.loadtxt(fname)
+    # read the header to get the params
+    with open(fname, 'r') as f:
+        header = f.readline()
+    header = header.strip('# \n')
+    params = header.split(' ')
+    return fisher_matrix, params
+
+
 # ---------- binning ---------- 
 
 

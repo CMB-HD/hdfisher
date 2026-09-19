@@ -2,7 +2,7 @@ import os
 import warnings
 import numpy as np
 from hd_mock_data import hd_data
-from . import utils, fisher, theory, mpi
+from . import utils, theory, mpi, config
 
 
 # create a custom warning category to always issue a warning about
@@ -45,9 +45,6 @@ class Data:
             MacInnis et. al. (2023), use `hd_data_version='v1.0'`. 
             See the `hdMockData` repository for a list of versions.
         """
-        # directory holding data used in MacInnis et. al. (2023):
-        data_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), 'data/')
-        self.data_path = lambda x: os.path.join(data_dir, x)
         # initialize the `HDMockData` class to access CMB-HD data:
         self.hd_data_version = hd_data_version.lower()
         self.hd_datalib = hd_data.HDMockData(version=self.hd_data_version)
@@ -141,47 +138,54 @@ class Data:
     # ----- functions that resturn file names of data: -----
 
     def fiducial_param_file(self, feedback=False):
-        """Returns the name of the YAML file holding the fiduical cosmological
-        and accuracy parameters that are passed to CAMB when calculating the 
-        CMB and BAO theory.
+        """Absolute path to the YAML file holding the fiduical parameters
+        (including cosmological and accuracy parameters) passed to CAMB
+        when calculating the CMB and BAO theory.
 
         Parameters
         ----------
         feedback : bool, default=False
             If `True`, the parameter file sets the CAMB `halofit_version`
-            to `mead2020_feedback`, i.e. uses the HMCode 2020 + feedback
-            non-linear model. Otherwise, the HMCode 2016 CDM-only model
-            is used by setting `halofit_version` to `mead2016`.
+            to `mead2020_feedback`, i.e. uses the HMCode 2020 + baryonic
+            feedback non-linear model. Otherwise, the HMCode 2016
+            CDM-only model is used by setting `halofit_version` to
+            `mead2016`.
 
         Returns
         -------
         fname : str
-            The name of the parameter file, including its absolute path.
-        """
-        fid_params_dir = self.data_path('fiducial_params')
-        fname = 'fiducial_params_feedback.yaml' if feedback else 'fiducial_params.yaml'
-        return os.path.join(fid_params_dir, fname)
+            The absolute path to the file.
 
-    
+        See Also
+        --------
+        config.fiducial_param_file
+        """
+        fname = config.fiducial_param_file(feedback=feedback)
+        return fname
+
+
     def fiducial_fisher_steps_file(self, feedback=False):
-        """Returns the name of the YAML file holding the fiduical parameter 
+        """Absolute path to the YAML file holding the fiduical parameter
         step sizes used to calculate the Fisher matrices.
 
         Parameters
         ----------
         feedback : bool, default=False
-            If `True`, the file includes a step size for the HMCode 2020 
-            baryonic feedback parameter, `HMCode_logT_AGN`. Otherwise this 
-            parameter is excluded.
+            If `True`, the file includes a step size for the HMCode 2020
+            baryonic feedback parameter, `HMCode_logT_AGN`. Otherwise
+            this parameter is excluded.
 
         Returns
         -------
         fname : str
-            The name of the file, including its absolute path.
+            The absolute path to the file.
+
+        See Also
+        --------
+        config.fiducial_fisher_steps_file
         """
-        fid_steps_dir = self.data_path('fisher_step_sizes')
-        fname = 'fiducial_step_sizes_feedback.yaml' if feedback else 'fiducial_step_sizes.yaml'
-        return os.path.join(fid_steps_dir, fname)
+        fname = config.fiducial_fisher_steps_file(feedback=feedback)
+        return fname
 
 
     def example_hd_fisher_fname(self, cmb_type='delensed', use_H0=False, with_desi=False):
@@ -232,7 +236,7 @@ class Data:
         desi_info = '_desi_bao' if with_desi else ''
         fname_root = f'hd_fsky0pt6_{ell_info}_{cmb_type}{desi_info}{H0_info}'
         version = self.hd_datalib.version
-        fisher_dir = os.path.join(self.data_path(f'fisher_matrices'), 'hd_examples')
+        fisher_dir = os.path.join(config.data_path(f'fisher_matrices'), 'hd_examples')
         fname = os.path.join(fisher_dir, f'{fname_root}_fisher_{version}.txt')
         return fname
 
@@ -311,7 +315,7 @@ class Data:
                 spec_info = f'{spectrum_type}_cls'
             else:
                 spec_info = spectrum_type
-            theo_dir = self.data_path('theory')
+            theo_dir = config.data_path('theory')
             fname = os.path.join(theo_dir, f'hd{feedback_info}_lmin{lmin}lmax{lmax}Lmax{Lmax}_{spec_info}.txt')
         return fname
 
@@ -387,7 +391,7 @@ class Data:
                 spec_info = f'{spectrum_type}_cls'
             else:
                 spec_info = spectrum_type
-            theo_dir = self.data_path('theory')
+            theo_dir = config.data_path('theory')
             fname = os.path.join(theo_dir, f'{exp}_lmin{lmin}lmax{lmax}Lmax{Lmax}_{spec_info}.txt')
         if not os.path.exists(fname):
             msg = f"The requested file {fname} does not exist."
@@ -485,7 +489,7 @@ class Data:
             fname = self.hd_datalib.cmb_noise_fname(include_fg=include_fg)
         # otherwise, there is only one version:
         if exp in valid_exps[:-1]:
-            noise_dir = self.data_path('noise')
+            noise_dir = config.data_path('noise')
             fname = os.path.join(noise_dir, f'{exp}_coaddf090f150_cmb_noise_cls_lmax5000.txt')
             if not include_fg:
                 msg = f"Ignoring the `include_fg` argument for `exp = '{exp}'`."
@@ -568,7 +572,7 @@ class Data:
             lmin = self.lmins['hd']
             lmax = hd_Lmax # for HD, lmax and Lmax will be the same
             Lmax = hd_Lmax
-            fname = os.path.join(self.data_path('noise'), f'hd{extra_info}_lmin{lmin}lmax{lmax}Lmax{Lmax}_nlkk.txt')
+            fname = os.path.join(config.data_path('noise'), f'hd{extra_info}_lmin{lmin}lmax{lmax}Lmax{Lmax}_nlkk.txt')
         return fname
 
 
@@ -627,7 +631,7 @@ class Data:
             lmin = self.lmins[exp]
             lmax = self.lmaxs[exp]
             Lmax = self.Lmaxs[exp]
-            fname = os.path.join(self.data_path('noise'), f'{exp}_lmin{lmin}lmax{lmax}Lmax{Lmax}_nlkk.txt')
+            fname = os.path.join(config.data_path('noise'), f'{exp}_lmin{lmin}lmax{lmax}Lmax{Lmax}_nlkk.txt')
         if not os.path.exists(fname):
             msg = f"The requested file {fname} does not exist."
             warnings.warn(msg)
@@ -752,7 +756,7 @@ class Data:
         else:
             extra_info = '' if include_fg else '_nofg'
             ell_info = f'lmin{lmin}lmax{lmax}lmaxTT{lmaxTT}Lmax{Lmax}'
-            fname = os.path.join(self.data_path('covmats'), f'hd{extra_info}_fsky0pt6_{ell_info}_binned_{cmb_type}_cov.txt')
+            fname = os.path.join(config.data_path('covmats'), f'hd{extra_info}_fsky0pt6_{ell_info}_binned_{cmb_type}_cov.txt')
         if not os.path.exists(fname):
             msg = f"The requested file {fname} does not exist."
             warnings.warn(msg)
@@ -832,7 +836,7 @@ class Data:
             Lmax = self.Lmaxs[exp]
             # get the file name
             ell_info = f'lmin{lmin}lmax{lmax}lmaxTT{lmaxTT}Lmax{Lmax}'
-            fname = os.path.join(self.data_path('covmats'), f'{exp}_fsky0pt6_{ell_info}_binned_{cmb_type}_cov.txt')
+            fname = os.path.join(config.data_path('covmats'), f'{exp}_fsky0pt6_{ell_info}_binned_{cmb_type}_cov.txt')
         if not os.path.exists(fname):
             msg = f"The requested file {fname} does not exist."
             warnings.warn(msg)
@@ -845,13 +849,13 @@ class Data:
         the file contains the redshift z, and the second contains the
         quantity r_s/d_V evaluated at that redshift.
         """
-        return os.path.join(self.data_path('bao'), 'mock_desi_bao_rs_over_DV_fid_data.txt')
+        return os.path.join(config.data_path('bao'), 'mock_desi_bao_rs_over_DV_fid_data.txt')
 
 
     def desi_covmat_fname(self):
         """Returns the name of the covariance matrix for the mock DESI BAO
         measurements r_s/d_V(z)."""
-        return os.path.join(self.data_path('bao'), 'mock_desi_bao_rs_over_DV_fid_cov.txt')
+        return os.path.join(config.data_path('bao'), 'mock_desi_bao_rs_over_DV_fid_cov.txt')
 
 
     def precomputed_desi_fisher_fname(self, use_H0=False):
@@ -875,7 +879,7 @@ class Data:
             The requested file name.
         """
         H0_info = '_useH0' if use_H0 else ''
-        fname = os.path.join(self.data_path('fisher_matrices'), f'desi_bao{H0_info}_fisher.txt')
+        fname = os.path.join(config.data_path('fisher_matrices'), f'desi_bao{H0_info}_fisher.txt')
         return fname
 
 
@@ -1003,7 +1007,7 @@ class Data:
             lmaxTT = self.lmaxsTT[exp]
             Lmax = self.Lmaxs[exp]
         fname_root = f'{exp}{fg_info}_fsky0pt6_lmin{lmin}lmax{lmax}lmaxTT{lmaxTT}Lmax{Lmax}_{cmb_type}{desi_info}{feedback_info}{H0_info}'
-        fisher_dir = self.data_path(f'fisher_matrices')
+        fisher_dir = config.data_path(f'fisher_matrices')
         fname = os.path.join(fisher_dir, f'{fname_root}_fisher.txt')
         return fname
         
@@ -1050,7 +1054,7 @@ class Data:
             If an unrecognized `cmb_type` was passed.
         """
         fname = self.example_hd_fisher_fname(cmb_type=cmb_type, use_H0=use_H0, with_desi=with_desi)
-        fisher_matrix, fisher_params = fisher.load_fisher_matrix(fname)
+        fisher_matrix, fisher_params = utils.load_fisher_matrix(fname)
         return fisher_matrix, fisher_params
 
 
@@ -1644,7 +1648,7 @@ class Data:
             in the same order as their corresponding rows/columns.
         """
         fname = self.precomputed_desi_fisher_fname(use_H0=use_H0)
-        fisher_matrix, fisher_params = fisher.load_fisher_matrix(fname)
+        fisher_matrix, fisher_params = utils.load_fisher_matrix(fname)
         return fisher_matrix, fisher_params
 
 
@@ -1724,7 +1728,7 @@ class Data:
         dataconfig.Data.precomputed_cmb_fisher_fname
         """
         fname = self.precomputed_cmb_fisher_fname(exp, cmb_type=cmb_type, use_H0=use_H0, with_desi=with_desi, hd_lmax=hd_lmax, include_fg=include_fg, feedback=feedback)
-        fisher_matrix, fisher_params = fisher.load_fisher_matrix(fname)
+        fisher_matrix, fisher_params = utils.load_fisher_matrix(fname)
         return fisher_matrix, fisher_params
 
 
