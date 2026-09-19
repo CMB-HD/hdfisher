@@ -809,7 +809,7 @@ class Fisher:
         # check if we have a covariance matrix for this experiment
         self.exp = exp.lower()
         if exp not in self.datalib.cmb_exps:
-            err_msg = f"Invalid `exp`: '{exp}'. Valid options are: {datalib.cmb_exps}."
+            err_msg = f"Invalid `exp`: '{exp}'. Valid options are: {self.datalib.cmb_exps}."
             raise ValueError(err_msg)
         # warn about ignored arguments, and which covmats are available
         if exp != 'hd':
