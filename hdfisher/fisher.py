@@ -71,9 +71,8 @@ def get_param_info(param_file, fisher_steps_file):
     for param in step_info.keys():
         # make sure we have a fiducial value for that param
         if param not in fids.keys():
-            msg = (f"The parameter '{param}' in the `fisher_steps_file` "
-                   f"'{fisher_steps_file}' will be ignored because there is "
-                   f"no fiducial value in the `param_file` '{param_file}'.")
+            msg = (f"The parameter '{param}' in the `fisher_steps_file` will be "
+                   "ignored because there is no fiducial value in the `param_file`.")
             warnings.warn(msg)
         else:
             step = step_info[param]['step_size']
@@ -805,6 +804,7 @@ class Fisher(FisherData):
 
     def __init__(self, fisher_dir, param_file=None, fisher_steps_file=None,
                  fisher_params=None, use_H0=False, feedback=False,
+                 use_class=False, #TODO
                  overwrite=False, **kwargs):
         """Initialization for a given experimental configuration and set
         of parameters to be included in the Fisher matrix.
