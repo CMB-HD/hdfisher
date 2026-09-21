@@ -383,7 +383,9 @@ class Theory:
     cmb_types = ['lensed', 'unlensed', 'delensed'] 
     cmb_spectra = ['tt', 'ee', 'bb', 'te'] # order output by CAMB
 
-    def __init__(self, lmax, output_dir, output_root=None, param_file=None, nlkk=None, recon_lmin=None, recon_lmax=None, use_H0=False, **cosmo_params):
+    def __init__(self, lmax, output_dir, output_root=None, param_file=None, nlkk=None, recon_lmin=None, recon_lmax=None, use_H0=False,
+            use_class=False, #TODO
+            **cosmo_params):
         """Initialization of the theory calculation for a specific set of 
         cosmological, accuracy, and experimental parameters.
         
