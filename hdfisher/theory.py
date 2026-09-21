@@ -382,8 +382,6 @@ class Theory:
     """
     cmb_types = ['lensed', 'unlensed', 'delensed'] 
     cmb_spectra = ['tt', 'ee', 'bb', 'te'] # order output by CAMB
-    theo_cols = ['ells', 'tt', 'te', 'ee', 'bb', 'kk'] # order when saving to file
-
 
     def __init__(self, lmax, output_dir, output_root=None, param_file=None, nlkk=None, recon_lmin=None, recon_lmax=None, use_H0=False, **cosmo_params):
         """Initialization of the theory calculation for a specific set of 
@@ -556,7 +554,7 @@ class Theory:
                 theo[cmb_type] = self.theo[cmb_type].copy()
             elif os.path.exists(fname) and (not overwrite): # load it
                 print(f"loading {cmb_type} theory from {fname}")
-                theo[cmb_type] = utils.load_from_file(fname, self.theo_cols)
+                theo[cmb_type] = utils.load_from_file(fname, config.theo_cols)
             else: # get it from camb
                 if self.results is None:
                     self.get_camb_results(save=save)
@@ -564,7 +562,7 @@ class Theory:
             # save it
             if save:
                 print(f"saving {cmb_type} theory to {fname}") 
-                utils.save_to_file(fname, theo[cmb_type], keys=self.theo_cols)
+                utils.save_to_file(fname, theo[cmb_type], keys=config.theo_cols)
             self.theo[cmb_type] = theo[cmb_type].copy()
         return theo
 
@@ -653,7 +651,7 @@ class Theory:
             delensed_theo = self.theo['delensed'].copy()
         if os.path.exists(fname) and (not overwrite): # load it
             print(f"loading delensed theory from {fname}")
-            delensed_theo = utils.load_from_file(fname, self.theo_cols)
+            delensed_theo = utils.load_from_file(fname, config.theo_cols)
         else: # calculate it
             self.check_delensing_vars()
             if self.results is None:
@@ -661,12 +659,12 @@ class Theory:
             delensed_theo = get_delensed_spectra(self.camb_params, self.lmax, self.nlkk, self.Lmin, Lmax=self.Lmax, camb_results=self.results, raw_cl=True, CMB_unit='muK')
         if save:
             print(f"saving delensed theory to {fname}") 
-            utils.save_to_file(fname, delensed_theo, keys=self.theo_cols)
+            utils.save_to_file(fname, delensed_theo, keys=config.theo_cols)
         self.theo['delensed'] = delensed_theo.copy()
         return delensed_theo
    
 
-    def get_theory(self, cmb_types=None, save=False, overwrite=False):
+    def get_theory(self, cmb_types=None, output_lmax=None, save=False, overwrite=False):
         """Returns the lensed, unlensed, and/or delensed CMB and lensing 
         potential theory spectra.
 
@@ -675,23 +673,28 @@ class Theory:
         cmb_types : str or list of str, default=None
             The type of CMB spectra to return. Must be 'lensed', 'unlensed', 
             and/or 'delensed'. Returns all three by default.
+        output_lmax : int or None, default=None
+            If provided and `output_lmax` is lower than the `lmax` 
+            attribute, cut the spectra at a maximum multipole given by the
+            `output_lmax` value.
         overwrite : bool, default=False
-            If `False`, try to load the theory from the `output_dir` passed when
-            initializing the `Theory` class, or use the theory spectra stored in 
-            memory (in the `Theory.theo` dictionary) if it has already been 
-            calculated, instead of re-computing it.
+            If `False`, try to load the theory from the `output_dir` 
+            passed when initializing the `Theory` class, or use the theory
+            spectra stored in memory (in the `Theory.theo` dictionary) if
+            it has already been  calculated, instead of re-computing it.
         save : bool, default=False
             If `True`, save the theory to the `output_dir` passed when
             initializing the `Theory` class.
 
         Returns
         -------
-        theo : nested dict of array_like of float
+        theo : dict of dict of array_like of float
             A dictionary with key(s) given by the `cmb_types`. Each holds
-            another dict containing one-dimensional arrays for the spectra, with
-            keys 'ells' for the multipoles, 'tt', 'ee', 'te', 'bb' for the CMB
-            spectra (C_ell's in units of uK^2), and 'kk' for the lensing potential
-            spectrum (C_L^kappakappa = C_L^phiphi * [L * (L + 1)]^2 / 4). 
+            another dict containing one-dimensional arrays for the
+            spectra, with keys `'ells'` for the multipoles, `'tt'`,
+            `'te'`, `'ee'`, `'bb'` for the CMB spectra (C_ell's in units
+            of uK^2), and `'kk'` for the lensing potential spectrum
+            (C_L^kappakappa = C_L^phiphi * [L * (L + 1)]^2 / 4).
             Everything begins at ell = 0.
 
         Raises
@@ -706,12 +709,14 @@ class Theory:
             cmb_types = [cmb_types]
         for cmb_type in cmb_types:
             if cmb_type.lower() not in self.cmb_types:
-                err_msg = f"You passed `cmb_types = {cmb_types}`, but `{cmb_type}` is not a valid option; must be one of {self.cmb_types}."
+                err_msg = (f"You passed `{cmb_types = }`, but "
+                           f"`'{cmb_type}'` is not a valid option. "
+                           f"The valid `cmb_types` are `{self.cmb_types}`.")
                 raise ValueError(err_msg)
         # get theory for each cmb_type
         theo = {}
         for cmb_type in cmb_types:
-            if len(list(self.theo[cmb_type].keys())) < len(self.theo_cols):
+            if len(list(self.theo[cmb_type].keys())) < len(config.theo_cols):
                 if 'delens' in cmb_type.lower():
                     theo_spectra = self.get_delensed_spectra(save=save, overwrite=overwrite)
                 else:
@@ -719,4 +724,9 @@ class Theory:
                 theo[cmb_type] = theo_spectra.copy()
             else:
                 theo[cmb_type] = self.theo[cmb_type].copy()
+            if output_lmax is not None:
+                output_lmax = int(output_lmax)
+                if output_lmax < self.lmax:
+                    for key in theo[cmb_type]:
+                        theo[cmb_type][key] = theo[cmb_type][key][:output_lmax+1]
         return theo

@@ -1,7 +1,12 @@
 import os
 import warnings
 import numpy as np
+from hd_mock_data import hd_data
 from . import utils
+
+# columns in power spectra files:
+theo_cols = ['ells', 'tt', 'te', 'ee', 'bb', 'kk']
+noise_cols = ['ells', 'tt', 'te', 'ee', 'bb'] # for CMB noise
 
 
 def data_path(relative_path):
@@ -26,7 +31,7 @@ def data_path(relative_path):
     return absolute_path
 
 
-def fiducial_param_file(feedback=False):
+def fiducial_param_file(feedback=False, hd_data_version='latest'):
     """Absolute path to the YAML file holding the fiduical parameters
     (including cosmological and accuracy parameters) passed to CAMB when
     calculating the CMB and BAO theory.
@@ -38,6 +43,11 @@ def fiducial_param_file(feedback=False):
         to `mead2020_feedback`, i.e. uses the HMCode 2020 + baryonic
         feedback non-linear model. Otherwise, the HMCode 2016 CDM-only
         model is used by setting `halofit_version` to `mead2016`.
+    hd_data_version : str, default='latest'
+        The CMB-HD data version to use.  By default, the latest version is
+        used. To reproduce the results in  MacInnis et. al. (2023), use 
+        `hd_data_version='v1.0'`. See the `hdMockData` repository for a
+        list of versions.
 
     Returns
     -------
@@ -50,7 +60,13 @@ def fiducial_param_file(feedback=False):
     """
     fid_params_dir = data_path('fiducial_params')
     feedback_info = '_feedback' if feedback else ''
-    fname = os.path.join(fid_params_dir, f'fiducial_params{feedback_info}.yaml')
+    if hd_data_version in ['v1.0', 'v1.1']:
+        v = 'v1.0'
+    else:
+        hd_datalib = hd_data.HDMockData(version=hd_data_version)
+        v = hd_datalib.get_compatible_version(hd_datalib.camb_theo_versions, 
+                                              'CAMB parameters')
+    fname = os.path.join(fid_params_dir, f'fiducial_params{feedback_info}_{v}.yaml')
     return fname
 
 

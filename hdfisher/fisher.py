@@ -279,7 +279,7 @@ def load_cmb_fisher_derivs(derivs_dir, cmb_types=None, params=None,
     list of parameters will be the same for each CMB type.
     """
     valid_cmb_types = ['lensed', 'unlensed', 'delensed']
-    cols = theory.Theory.theo_cols # all columns in derivs file
+    cols = config.theo_cols # all columns in derivs file
     all_cmb_types, all_params = get_available_cmb_fisher_derivs(derivs_dir, use_H0=use_H0)
     if cmb_types is None:
         cmb_types = all_cmb_types
@@ -675,15 +675,129 @@ def get_common_params(list_of_dicts):
 
 
 
-class Fisher:
+class FisherData:
+    """Data needed to calculate Fisher matrices."""
+    cov_spectra = ['tt', 'te', 'ee', 'bb', 'kk'] # in covmats
+    
+    def __init__(self, exp='hd', hd_data_version='latest', 
+                 pol_only_lensing=False, hd_lmax=None, include_fg=True):
+        """Initialization for a given experimental configuration.
+        
+        Parameters
+        ----------
+        exp : str, default='hd'
+            The name of a CMB experiment, used to load its covariance
+            matrix and set the multipole ranges used to calculate the
+            Fisher matrix. Must be either `'HD'`, `'SO'`, or `'S4'`. The
+            name is case-insensitive.
+        hd_data_version : str, default='latest'
+            The CMB-HD mock data version to use. This determines which
+            CMB-HD covariance matrix, noise spectra, etc. is used. By
+            default, the latest version is used. To reproduce the results
+            in MacInnis et. al. (2023), use `hd_data_version='v1.0'`.
+            See the `hdMockData` repository for a list of versions.
+            
+        Other Parameters
+        ----------------
+        pol_only_lensing : bool, default=False
+            If `True`, the CMB-HD lensing reconstruction noise is
+            calculated with only the EE and EB estimators. By default,
+            the TT, TE, TB, EE, and EB estimators are used. Only
+            available for `hd_data_version` >= `'v1.2'` (the default).
+            Ignored if `exp` is not `'HD'`.
+        include_fg : bool, default=True
+            If `True`, the CMB-HD mock data was calculated including the
+            effects of residual extragalactic foregrounds in temperature.
+            If `False`, the data was calculated by neglecting these
+            effects; only available for v1.0 CMB-HD mock data with 
+            `cmb_type='lensed'` and `hd_lmax=None` or `hd_lmax=20100`.
+            Ignored if `exp` is not `'HD'`.
+        hd_lmax : int, default=None
+            Used for CMB-HD mock data that was calculated with a lower
+            maximum (CMB and lensing) multipole than the default; the
+            non-default options are `1000`, `3000`, `5000`, or `10000`.
+            Only available for `'v1.0'` of the CMB-HD mock data when 
+            `cmb_type='delensed'` and `include_fg=True`. Ignored if `exp`
+            is not `'HD'`.
+        
+        Raises
+        ------
+        ValueError
+            If a set of invalid experimental parameters were passed.
+
+        Warns
+        -----
+        If any of the arguments will be ignored, and if we do not have
+        covariance matrices for both lensed and delensed mock spectra,
+        which limits the kind (lensed or delensed) of spectra that can be
+        used to calculate a Fisher matrix.
+        """
+        self.data = dataconfig.Data(hd_data_version=hd_data_version)
+        self.hd_data_version = self.data.hd_data_version
+        self.exp = self.data._check_cmb_exp(exp)
+        
+        self.cmb_types = ['lensed', 'delensed', 'unlensed'] # for theory spectra
+        self.cov_cmb_types = self.data.cov_cmb_types[self.exp].copy() # for covmats
+        
+        # multipole ranges and binning:
+        self.ell_ranges = deepcopy(self.data.ell_ranges[self.exp])
+        self.lmin = self.data.lmins[self.exp]
+        self.Lmin = self.lmin
+        self.lmax = self.data.lmaxs[self.exp]
+        self.Lmax = self.data.Lmaxs[self.exp]
+        self.theo_lmax = self.data.theo_lmaxs[self.exp]
+        self.bin_edges = self.data.load_bin_edges()
+        # for CMB-HD:
+        if self.exp == 'hd':
+            self.data._check_hd_fgs(include_fg=include_fg)
+            if not include_fg:
+                self.cov_cmb_types = ['lensed']
+                warnings.warn(f"There is no delensed CMB-HD covariance matrix"
+                              " available for `include_fg=False`.")
+            if hd_lmax is not None:
+                hd_lmax = self.data._check_hd_lmax(hd_lmax, include_fg=include_fg)
+                if hd_lmax < self.lmax:
+                    warnings.warn("There is no lensed CMB-HD covariance matrix"
+                                  f"available for `{hd_lmax = }`.")
+                    self.cov_cmb_types = ['delensed']
+                    self.lmax = hd_lmax
+                    self.Lmax = hd_lmax
+                    self.theo_lmax = hd_lmax
+                    for key in self.ell_ranges:
+                        self.ell_ranges[key][1] = hd_lmax
+        else:
+            warnings.warn("Ignoring the `hd_lmax`, `include_fg`, and "
+                          f"`pol_only_lensing` arguments for {exp = }.")
+        self.include_fg = include_fg
+        self.hd_lmax = hd_lmax
+        self.pol_only_lensing = pol_only_lensing
+        # lensing noise (used to calculate delensed spectra)
+        _, self.nlkk = self.data.load_cmb_lensing_noise_spectrum(self.exp, hd_Lmax=self.hd_lmax, 
+                                                                 include_fg=self.include_fg, 
+                                                                 pol_only_lensing=self.pol_only_lensing)
+        
+        if len(self.cov_cmb_types) == 1:
+            cmb_type = self.cov_cmb_types[0]
+            warnings.warn(f"There is only a {cmb_type} covariance matrix "
+                          f"available for {exp = } and {hd_data_version = }.")
+        
+        
+    def covmat(self, cmb_type='delensed'):
+        cov = self.data.load_cmb_covmat(self.exp, cmb_type=cmb_type, 
+                                        pol_only_lensing=self.pol_only_lensing,
+                                        include_fg=self.include_fg, 
+                                        hd_lmax=self.hd_lmax)
+        return cov
+
+
+class Fisher(FisherData):
     """Calculate new Fisher derivatives and matrices from the mock CMB
     and BAO covariance matrices provided with `hdfisher`.
     """
-    
-    def __init__(self, fisher_dir, exp='hd', overwrite=False, param_file=None, 
-            fisher_steps_file=None, feedback=False, fisher_params=None, 
-            use_H0=False, hd_lmax=None, include_fg=True, 
-            hd_data_version='latest'):
+
+    def __init__(self, fisher_dir, param_file=None, fisher_steps_file=None,
+                 fisher_params=None, use_H0=False, feedback=False,
+                 overwrite=False, **kwargs):
         """Initialization for a given experimental configuration and set
         of parameters to be included in the Fisher matrix.
 
@@ -691,161 +805,98 @@ class Fisher:
         ----------
         fisher_dir : str
             The absolute path to a directory in which the theory and its
-            derivatives used to calculate the Fisher matrix, and the 
-            calculated Fisher matrices, will be saved. The directory will 
+            derivatives used to calculate the Fisher matrix, and the
+            calculated Fisher matrices, will be saved. The directory will
             be created if it does not exist.
-        exp : str, default='hd'
-            The name of a CMB experiment, used to load its covariance matrix
-            and set the multipole ranges for the theory that is used to 
-            calculate the Fisher matrix. Must be either `'SO'`, `'S4'`, or 
-            `'HD`'. The name is case-insensitive.
-        overwrite : bool, default=False
-            If `False`, any Fisher derivatives or matrices that are saved
-            in the `fisher_dir` will be loaded. Otherwise, if `True`, the
-            results will be re-calculated, and their files will be 
-            over-written by the new calculations.
         param_file : str or None, default=None
             The name (including the full path) of a YAML file containing
             the names and fiducial values of cosmological parameters used
-            in the theory calculation, and any other names that can be passed
-            to the CAMB function `camb.set_params()` (e.g., accuracy 
-            parameters). Each entry in the file should have its own line
-            in the format `param_name: value`. If `param_file=None`, the 
-            default file included with `hdfisher` is used.
+            in the theory calculation, and any other names that can be
+            passed to the CAMB function `camb.set_params()` (e.g.,
+            accuracy parameters). Each entry in the file should have its
+            own line in the format `param_name: value`.
+            If `param_file=None`, the default file included with
+            `hdfisher` is used.
         fisher_steps_file : str or None, default=None
-            The name (including the full path) of a YAML file containing 
-            the step sizes to use when calculating the derivatives of the 
-            theory with respect to each parameter included in the Fisher 
-            matrix. Each parameter should have its own block with two entries:
-            a `step_size` (float), giving the step size to use for the 
-            numerical derivatives when varying the parameter up/down; and 
-            the `step_type` (str), which should be `'absolute'`, or 
-            `'relative'` if the `step_size` was given as a fraction of the
-            fiduical parameter value (e.g., a relative step size of 0.01 
-            corresponds to an absolute step size of 1% of the fiducial value).
-            Each parameter in the `fisher_steps_file` must have a fiducial
-            value specified in the `param_file`.
-        feedback : bool, default=False
-            Used if `param_file=None` and/or `fisher_steps_file=None`. If 
-            `feedback=True`, the default `param_file` specifies the HMCode2020 
-            + feedback non-linear model to use for the theory calculation, and 
-            includes a fiducial value for its feedback parameter, with a step
-            size given in the default `fisher_steps_file`. If `False`, the
-            CDM-only model with HMCode2016 is used.
+            The name (including the full path) of a YAML file containing
+            the step sizes to use when calculating the derivatives of the
+            theory with respect to each parameter included in the Fisher
+            matrix. Each parameter should have its own block with two
+            entries: a `step_size` (float), giving the step size to use
+            for the numerical derivatives when varying the parameter up
+            or down; and the `step_type` (str), which should be
+            `'absolute'`, or `'relative'` if the `step_size` was given as
+            a fraction of the fiduical parameter value (e.g., a relative
+            step size of 0.01 corresponds to an absolute step size of 1%
+            of the fiducial value). Each parameter in the
+            `fisher_steps_file` must have a fiducial value specified in
+            the `param_file`.
         fisher_params : None or list of str, default=None
-            An optional list of parameter names to use in the calculation,
-            which must be a sub-set of the parameters in the 
-            `fisher_steps_file`. If `None`, all parameters in the 
+            An optional list of parameter names to use in the
+            calculation, which must be a sub-set of the parameters in the
+            `fisher_steps_file`. If `None`, all parameters in the
             `fisher_steps_file` are used.
         use_H0 : bool, default=False
-            Used when the `fisher_steps_file` (or the `fisher_params` list)
-            contains both the Hubble constant `'H0'` and the cosmoMC 
-            approximation to the angular scale of the sound horizon at last
-            scattering, `cosmomc_theta` (or `theta`, defined as 
-            `100 * cosmomc_theta`). Only one of these parameters can be used
-            in the calculation. If `use_H0=True`, `'H0'` is used; otherwise,
+            Used when the `fisher_steps_file` (or the `fisher_params`
+            list) contains both the Hubble constant `'H0'` and the
+            cosmoMC approximation to the angular scale of the sound
+            horizon at last scattering, `cosmomc_theta` (or `theta`,
+            which is defined in `hdfisher` as `100 * cosmomc_theta`).
+            Only one of these parameters can be used in the theory
+            calculation. If `use_H0=True`, `'H0'` is used; otherwise,
             `'cosmomc_theta'` is used.
-        hd_lmax : int or None, default=None
-            Only used if `exp='hd'`. Must be `1000`, `3000`, `5000`, or `10000`
-            to use a CMB-HD covariance matrix computed to a maximum multipole
-            given by the `hd_lmax` value. Otherwise, the baseline value of
-            20100 is used. Note that we only provide these covariance matrices
-            for the mock delensed CMB power spectra and lensing spectrum,
-            i.e. Fisher matrices can only be calculated from delensed spectra.
-        include_fg : bool, default=True
-            Only used if `exp='hd'`. If `False`, the CMB-HD covariance matrix
-            for the mock lensed CMB power spectra and lensing spectrum was
-            calculated without including the effects of residual extragalactic
-            foregrounds; otherwise, these effects are included. Note that there
-            is no corresponding covariance matrix for delensed spectra that
-            does not include foregrounds, i.e. `include_fg=False` will only
-            exclude foregrounds from the lensed Fisher matrices.
-        hd_data_version : str, default='latest'
-            The CMB-HD data version to use. This determines which CMB-HD
-            covariance matrix, noise spectra, etc. is used. By default,
-            the latest version is used. To reproduce the results in
-            MacInnis et. al. (2023), use `hd_data_version='v1.0'`.
-            See the `hdMockData` repository for a list of versions.
+        feedback : bool, default=False
+            Used if `param_file=None` and/or `fisher_steps_file=None`. If
+            `feedback=True`, the default `param_file` specifies the
+            HMCode2020 + feedback non-linear model to use for the theory
+            calculation, and includes a fiducial value for its feedback
+            parameter, with a step size given in the default
+            `fisher_steps_file`. If `False`, the  CDM-only model with
+            HMCode2016 is used.
+        overwrite : bool, default=False
+            If `False`, any Fisher derivatives or matrices that are saved
+            in the `fisher_dir` will be loaded. Otherwise, if `True`, the
+            results will be re-calculated, and their files will be
+            over-written by the new calculations.
+        **kwargs : dict
+            Keyword arguments accepted by the `FisherData` class for the
+            experimental configuration, including the `exp` name and the
+            `hd_data_version`.
 
         Raises
         ------
         ValueError
-            If an invalid `exp` or `hd_lmax` value was passed, or if the
-            `fisher_steps_file` contains a parameter that wasn't given in
-            the `param_file`.
-
-        Warns
-        -----
-        If any of the arguments will be ignored, and if we do not have 
-        covariance matrices for both lensed and delensed mock spectra, which
-        limits the kind (lensed or delensed) of spectra that can be used to
-        calculate the Fisher matrix.
+            If a set of invalid experimental parameters were passed, or
+            if the `fisher_steps_file` contains a parameter that wasn't
+            given in the `param_file`.
 
         Notes
         -----
-        Copies of the `param_file` and `fisher_steps_file` will be saved in
-        the `fisher_dir`. 
+        Copies of the `param_file` and `fisher_steps_file` will be saved
+        in the `fisher_dir`.
 
         If you would like the option to switch between using `'H0'` and
-        `'cosmomc_theta'` in your Fisher matrices, you will need to calculate
-        two sets of Fisher derivatives: one that contains derivatives of the 
-        theory with respect to `'cosmomc_theta'` and fixes it when varying the
-        other parameters, and a second that uses `'H0'` instead. You should
-        (re-)initialize the `Fisher` class twice, with `use_H0=False` (to 
-        do the first calculation) and then again with `use_H0=True` (to do
-        the second calculation), with all other arguments unchanged. Then, 
-        you may use either parameter by setting the `use_H0` flag in the
-        `get_fisher` method, which will override the value set here.
+        `'cosmomc_theta'` in your Fisher matrices, you will need to
+        calculate two sets of Fisher derivatives: one that contains
+        derivatives of the theory with respect to `'cosmomc_theta'` and
+        fixes it when varying the other parameters, and a second that
+        uses `'H0'` instead. You should (re-)initialize the `Fisher`
+        class twice, with `use_H0=False` (to do the first calculation)
+        and then again with `use_H0=True` (to do the second calculation),
+        with all other arguments unchanged. Then, you may use either
+        parameter by setting the `use_H0` flag in the `get_fisher`
+        method, which will override the value set here.
 
-        See also
+        See Also
         --------
-        dataconfig.Data.fiducial_param_file : the default `param_file`.
-        dataconfig.Data.fiducial_fisher_steps_file : the default `fisher_steps_file`.
+        config.fiducial_param_file : Default `param_file`
+        config.fiducial_fisher_steps_file : Default `fisher_steps_file`
         """
-        self.datalib = dataconfig.Data(hd_data_version=hd_data_version)
+        super().__init__(**kwargs)
         self.fisher_dir = fisher_dir
         self.overwrite = overwrite
         self.use_H0 = use_H0
-        # check if we have a covariance matrix for this experiment
-        self.exp = exp.lower()
-        if exp not in self.datalib.cmb_exps:
-            err_msg = f"Invalid `exp`: '{exp}'. Valid options are: {self.datalib.cmb_exps}."
-            raise ValueError(err_msg)
-        # warn about ignored arguments, and which covmats are available
-        if exp != 'hd':
-            msg1 = f"Ignoring the `hd_lmax` and `include_fg` arguments for `exp = '{exp}'`."
-            warnings.warn(msg1)
-            msg2 = f"NOTE that we only have mock covariance matrices for *delensed* (as opposed to lensed) CMB spectra for `exp = '{exp}'` (i.e., we can only calculate a Fisher matrix from delensed power spectra in this case)."
-            warnings.warn(msg2)
-        else:
-            if not include_fg:
-                msg = "NOTE that for CMB-HD, we only have mock covariance matrix that excludes the effects of foregrounds for mock lensed power spectra  (i.e., we can only calculate a Fisher matrix from lensed power spectra in this case)."
-                warnings.warn(msg)
-            if hd_lmax is not None:
-                msg = "NOTE that for CMB-HD, we only have mock covariance matrix calculated with a lower `hd_lmax` for *delensed* (as opposed to lensed) CMB spectra (i.e., we can only calculate a Fisher matrix from delensed power spectra in this case)."
-                warnings.warn(msg)
-        # set the multipole limits for the CMB theory calculation
-        self.ell_ranges = deepcopy(self.datalib.ell_ranges[self.exp])
-        self.Lmin = self.datalib.lmins[exp]
-        if (self.exp == 'hd') and (hd_lmax is not None):
-            valid_lmax_vals = self.datalib.hd_lmaxs + [self.datalib.lmaxs['hd']]
-            if int(hd_lmax) in valid_lmax_vals:
-                self.lmax = int(hd_lmax)
-                self.Lmax = int(hd_lmax)
-                # update maximum multipole for each spectrum type (TT, TE, ...)
-                for spec_type in self.ell_ranges.keys():
-                    self.ell_ranges[spec_type][1] = int(hd_lmax)
-            else:
-                err_msg = f"Invalid `hd_lmax`: {hd_lmax}. Valid options are: {valid_lmax_vals}"
-                raise ValueError(err_msg)
-        else:
-            self.lmax = self.datalib.lmaxs[self.exp]
-            self.Lmax = self.datalib.Lmaxs[self.exp]
-        self.z = self.datalib.desi_redshifts() # for BAO theory calculation
-        # get the lensing noise, needed to calculate delensed CMB theory:
-        self.include_fg = include_fg
-        hd_Lmax = self.Lmax if (self.exp == 'hd') else None
-        _, self.nlkk = self.datalib.load_cmb_lensing_noise_spectrum(self.exp, include_fg=self.include_fg, hd_Lmax=hd_Lmax)
+
         # get the fiducial parameter values and step sizes:
         self.param_file = param_file
         if self.param_file is None:
@@ -853,31 +904,29 @@ class Fisher:
         if fisher_steps_file is None:
             fisher_steps_file = self.get_fisher_steps_file(feedback=feedback)
         self.fid_params, self.step_sizes = get_param_info(self.param_file, fisher_steps_file)
-        mpi.comm.barrier()
-        # create the output directories, and save a copy of the input param 
-        #  and step sizes files:
+
+        # create the output directories, and save a copy of the
+        # input param and step sizes files:
         self.theo_dir = os.path.join(self.fisher_dir, 'theory')
         self.derivs_dir = os.path.join(self.fisher_dir, 'derivs')
         self.fmat_dir = os.path.join(self.fisher_dir, 'fisher_matrices')
-        if mpi.rank == 0: 
+        # make sure no one tries to load files (above) while rank 0 saves them:
+        mpi.comm.barrier()
+        if mpi.rank == 0:
             utils.set_dir(self.fisher_dir)
             utils.set_dir(self.theo_dir)
             utils.set_dir(self.derivs_dir)
             utils.set_dir(self.fmat_dir)
             self.save_param_steps_values()
         mpi.comm.barrier()
+
         # list of parameter names for varied parameters:
         self.all_varied_params = list(self.step_sizes.keys())
         if fisher_params is None:
-            self.fisher_params = list(self.step_sizes.keys())
+            self.fisher_params = self.all_varied_params.copy()
         else:
             self.fisher_params = fisher_params.copy()
-        # make sure we have a step size for that parameter:
-        for param in self.fisher_params:
-            if param not in self.step_sizes.keys():
-                err_msg = f"Invalid parameter `'{param}'` in `fisher_params`: you must provide a fiducial value and step size for `'{param}'` in the `param_file` and `fisher_steps_file`, respectively."
-                raise ValueError(err_msg)
-        # remove any fixed params (i.e., not included in `fisher_params`) 
+        # remove any fixed params (i.e., not included in `fisher_params`)
         #  from the `step_sizes` dict:
         step_size_keys = list(self.step_sizes.keys())
         for param in step_size_keys:
@@ -897,7 +946,8 @@ class Fisher:
         if os.path.exists(input_param_file) and (not self.overwrite):
             param_file = input_param_file
         else:
-            param_file = self.datalib.fiducial_param_file(feedback=feedback)
+            param_file = config.fiducial_param_file(feedback=feedback,
+                                                    hd_data_version=self.hd_data_version)
         return param_file
 
 
@@ -911,7 +961,7 @@ class Fisher:
         if os.path.exists(input_steps_file) and (not self.overwrite):
             fisher_steps_file = input_steps_file
         else:
-            fisher_steps_file = self.datalib.fiducial_fisher_steps_file(feedback=feedback)
+            fisher_steps_file = config.fiducial_fisher_steps_file(feedback=feedback)
         return fisher_steps_file
 
 
@@ -991,7 +1041,7 @@ class Fisher:
                     step_direction = 'up' if (value > self.fid_params[param]) else 'down'
                 # check if CMB and BAO theory is already saved
                 theo_fnames = [config.fisher_bao_theo_fname(self.theo_dir, param, step_direction, use_H0=self.use_H0)]
-                for cmb_type in self.datalib.cmb_types:
+                for cmb_type in self.cmb_types:
                     theo_fnames.append(config.fisher_cmb_theo_fname(self.theo_dir, cmb_type, param, step_direction, use_H0=self.use_H0))
                 if not all([os.path.exists(fname) for fname in theo_fnames]):
                     param_values.append((param, value))
@@ -1048,16 +1098,17 @@ class Fisher:
             if param == 'logA': # set 'As' to `None`, so 'logA' is actually used
                 cosmo_params['As'] = None
         # do the calculation:
-        theolib = theory.Theory(self.lmax, self.theo_dir, param_file=self.param_file, nlkk=self.nlkk, recon_lmin=self.Lmin, recon_lmax=self.Lmax, use_H0=self.use_H0, **cosmo_params)
-        cmb_theo = theolib.get_theory(save=False)
-        rs_dv = theolib.get_rs_dv(self.z, save=False)
+        theolib = theory.Theory(self.theo_lmax, self.theo_dir, param_file=self.param_file, nlkk=self.nlkk, recon_lmin=self.Lmin, recon_lmax=self.Lmax, use_H0=self.use_H0, **cosmo_params)
+        cmb_theo = theolib.get_theory(save=False, output_lmax=self.lmax)
+        z = dataconfig.desi_redshifts() 
+        rs_dv = theolib.get_rs_dv(z, save=False)
         # save the theory
         header_info = f'{param} = {value}\n'
-        for cmb_type in self.datalib.cmb_types:
+        for cmb_type in self.cmb_types:
             cmb_theo_fname = config.fisher_cmb_theo_fname(self.theo_dir, cmb_type, param, step_direction, use_H0=self.use_H0)
-            utils.save_to_file(cmb_theo_fname, cmb_theo[cmb_type], keys=self.datalib.theo_cols, extra_header_info=header_info)
+            utils.save_to_file(cmb_theo_fname, cmb_theo[cmb_type], keys=config.theo_cols, extra_header_info=header_info)
         bao_theo_fname = config.fisher_bao_theo_fname(self.theo_dir,  param, step_direction, use_H0=self.use_H0)
-        utils.save_to_file(bao_theo_fname, {'z': self.z, 'rs_dv': rs_dv}, keys=['z', 'rs_dv'],  extra_header_info=header_info)
+        utils.save_to_file(bao_theo_fname, {'z': z, 'rs_dv': rs_dv}, keys=['z', 'rs_dv'],  extra_header_info=header_info)
 
 
 
@@ -1076,16 +1127,16 @@ class Fisher:
         bao_fname = config.fisher_bao_deriv_fname(self.derivs_dir, param, use_H0=self.use_H0)
         utils.save_to_file(bao_fname, {'z': z, 'rs_dv': rs_dv_deriv}, keys=['z', 'rs_dv'], extra_header_info=header_info)
         # CMB:
-        for cmb_type in self.datalib.cmb_types:
+        for cmb_type in self.cmb_types:
             cmb_theo_up_fname = config.fisher_cmb_theo_fname(self.theo_dir, cmb_type, param, 'up', use_H0=self.use_H0)
-            cmb_theo_up = utils.load_from_file(cmb_theo_up_fname, self.datalib.theo_cols)
+            cmb_theo_up = utils.load_from_file(cmb_theo_up_fname, config.theo_cols)
             cmb_theo_down_fname = config.fisher_cmb_theo_fname(self.theo_dir, cmb_type, param, 'down', use_H0=self.use_H0)
-            cmb_theo_down = utils.load_from_file(cmb_theo_down_fname, self.datalib.theo_cols)
+            cmb_theo_down = utils.load_from_file(cmb_theo_down_fname, config.theo_cols)
             cmb_derivs = {'ells': cmb_theo_up['ells'].copy()}
-            for s in self.datalib.cov_spectra:
+            for s in self.cov_spectra:
                 cmb_derivs[s] = (cmb_theo_up[s] - cmb_theo_down[s]) / delta_param
             cmb_fname = config.fisher_cmb_deriv_fname(self.derivs_dir, cmb_type, param, use_H0=self.use_H0)
-            utils.save_to_file(cmb_fname, cmb_derivs, keys=self.datalib.theo_cols,  extra_header_info=header_info)
+            utils.save_to_file(cmb_fname, cmb_derivs, keys=config.theo_cols,  extra_header_info=header_info)
 
 
     # functions to calculate the Fisher matrix:
@@ -1133,9 +1184,9 @@ class Fisher:
         """
         if use_H0 is None:
             use_H0 = self.use_H0
-        spectra = self.datalib.cov_spectra
+        spectra = self.cov_spectra
         if binned:
-            bin_edges = self.datalib.load_bin_edges()
+            bin_edges = self.bin_edges
             ell_ranges = self.ell_ranges
         else:
             bin_edges = None
@@ -1240,10 +1291,8 @@ class Fisher:
             raise ValueError(err_msg)
         self.check_H0_theta()
         _, derivs = self.load_cmb_fisher_derivs(cmb_types=[cmb_type], binned=True, use_H0=use_H0)
-        hd_lmax = self.lmax if (self.exp == 'hd') else None
-        cmb_covmat = self.datalib.load_cmb_covmat(self.exp, cmb_type=cmb_type, include_fg=self.include_fg, hd_lmax=hd_lmax)
-        if params is None:
-            params = self.fisher_params.copy()
+        cmb_covmat = self.covmat(cmb_type=cmb_type)
+        params = self.fisher_params.copy() if (params is None) else params
         has_H0 = 'H0' in params
         has_theta = ('theta' in params) or ('cosmomc_theta' in params)
         if has_H0 and has_theta:
@@ -1266,7 +1315,7 @@ class Fisher:
             fisher_fname = os.path.join(self.fmat_dir, fname)
         else:
             fisher_fname = None
-        fisher_matrix = calc_cmb_fisher(cmb_covmat, derivs[cmb_type], params, spectra=self.datalib.cov_spectra, priors=priors, fname=fisher_fname)
+        fisher_matrix = calc_cmb_fisher(cmb_covmat, derivs[cmb_type], params, spectra=self.cov_spectra, priors=priors, fname=fisher_fname)
         return fisher_matrix.copy(), params.copy()
 
 
@@ -1326,7 +1375,7 @@ class Fisher:
             raise ValueError(err_msg)
         self.check_H0_theta()
         _, derivs = self.load_bao_fisher_derivs(use_H0=use_H0)
-        bao_covmat = self.datalib.load_desi_covmat()
+        bao_covmat = dataconfig.load_desi_covmat()
         if params is None:
             params = self.fisher_params.copy()
         has_H0 = 'H0' in params
@@ -1522,40 +1571,14 @@ class Fisher:
     def load_example_hd_fisher(self, cmb_type='delensed', use_H0=False, with_desi=False):
         """Returns an example CMB-HD Fisher matrix that was calculated with
         the correct `hd_data_version`, and a list of the parameters it 
-        contains. All Fisher matrices contain 8 parameters (LCDM + N_eff
-        + sum m_nu) and all have a Gaussian prior of sigma(tau) = 0.007 applied.
+        contains. 
 
-        Parameters
-        ----------
-        cmb_type : str, default='delensed'
-            If `cmb_type='delensed'`, the file holds a Fisher matrix calculated
-            from delensed CMB TT, TE, EE, and BB power spectra, in addition to
-            the CMB lensing spectrum. If `cmb_type='lensed'`, the Fisher matrix
-            was computed with lensed CMB spectra instead, as well as the CMB
-            lensing spectrum.
-        use_H0: bool, default=False
-            If `True`, the Hubble constant is used as one of the six LCDM
-            parameters. If `False`, the cosmoMC approximation to the angular
-            scale of the sound horizon at last scattering (multiplied by 100)
-            is used instead.
-        with_desi : bool, default=False
-            If `False`, the Fisher matrix was calculated using only CMB spectra.
-            If `True`, the Fisher matrix is the sum of a CMB and a mock DESI BAO
-            Fisher matrix.
-
-        Returns
-        -------
-        fisher_matrix : array_like of float
-            An array of shape `(8,8)` holding the elements of the Fisher matrix.
-        fisher_params : list of str
-            A list of parameter names for the parameters in the Fisher matrix,
-            in the same order as their corresponding rows/columns.
-
-        Raises
-        ------
-        ValueError
-            If an unrecognized `cmb_type` was passed.
+        See Also
+        --------
+        dataconfig.Data.load_example_hd_fisher
         """
-        fisher_matrix, fisher_params = self.datalib.load_example_hd_fisher(cmb_type=cmb_type, use_H0=use_H0, with_desi=with_desi)
+        fisher_matrix, fisher_params = self.data.load_example_hd_fisher(cmb_type=cmb_type, 
+                                                                        use_H0=use_H0, 
+                                                                        with_desi=with_desi)
         return fisher_matrix, fisher_params
 
