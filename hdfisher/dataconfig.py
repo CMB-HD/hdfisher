@@ -2,7 +2,7 @@ import os
 import warnings
 import numpy as np
 from hd_mock_data import hd_data
-from . import utils, theory, mpi, config
+from . import utils, mpi, config
 
 
 # if using MPI, only issue a warning from the main MPI process:
@@ -239,6 +239,7 @@ class Data:
 
     # ----- functions that resturn file names of data: -----
 
+    # TODO : remove this?
     def fiducial_param_file(self, feedback=False):
         """Absolute path to the YAML file holding the fiduical parameters
         (including cosmological and accuracy parameters) passed to CAMB
@@ -267,16 +268,14 @@ class Data:
         return fname
 
 
-    def fiducial_fisher_steps_file(self, feedback=False):
+    def fiducial_fisher_steps_file(self, use_class=False):
         """Absolute path to the YAML file holding the fiduical parameter
         step sizes used to calculate the Fisher matrices.
 
         Parameters
         ----------
-        feedback : bool, default=False
-            If `True`, the file includes a step size for the HMCode 2020
-            baryonic feedback parameter, `HMCode_logT_AGN`. Otherwise
-            this parameter is excluded.
+        use_class : bool, default=False
+            Whether CLASS is being used instead of CAMB.
 
         Returns
         -------
@@ -287,12 +286,12 @@ class Data:
         --------
         config.fiducial_fisher_steps_file
         """
-        fname = config.fiducial_fisher_steps_file(feedback=feedback)
+        fname = config.fiducial_fisher_steps_file(use_class=use_class)
         return fname
 
 
-    def example_hd_fisher_fname(self, cmb_type='delensed',
-                                use_H0=False, with_desi=False):
+    def example_hd_fisher_fname(self, cmb_type='delensed', use_H0=False,
+                                with_desi=False, use_class=False):
         """Path to an example CMB-HD Fisher matrix that was calculated
         with the correct `hd_data_version`.
 
@@ -318,6 +317,8 @@ class Data:
             If `False`, the Fisher matrix was calculated using only CMB
             spectra. If `True`, the Fisher matrix is the sum of a CMB and
             a mock DESI BAO Fisher matrix.
+        use_class : bool, default=False
+            Whether CLASS is being used instead of CAMB.
 
         Returns
         -------
@@ -333,6 +334,9 @@ class Data:
         --------
         load_example_hd_fisher
         """
+        # TODO:
+        if use_class:
+            raise NotImplementedError
         cmb_type = cmb_type.lower()
         if cmb_type not in self.cov_cmb_types['hd']:
             raise ValueError(f"Invalid `{cmb_type = }`. The options are:"
@@ -1076,8 +1080,8 @@ class Data:
     # ----- functions that load the data: -----
 
 
-    def load_example_hd_fisher(self, cmb_type='delensed',
-                               use_H0=False, with_desi=False):
+    def load_example_hd_fisher(self, cmb_type='delensed', use_H0=False,
+                               with_desi=False, use_class=False):
         """Load an example CMB-HD Fisher matrix that was calculated with
         the correct `hd_data_version`.
 
@@ -1103,6 +1107,8 @@ class Data:
             If `False`, the Fisher matrix was calculated using only CMB
             spectra. If `True`, the Fisher matrix is the sum of a CMB and
             a mock DESI BAO Fisher matrix.
+        use_class : bool, default=False
+            Whether CLASS is being used instead of CAMB.
 
         Returns
         -------
@@ -1119,7 +1125,8 @@ class Data:
         """
         fname = self.example_hd_fisher_fname(cmb_type=cmb_type,
                                              use_H0=use_H0,
-                                             with_desi=with_desi)
+                                             with_desi=with_desi,
+                                             use_class=use_class)
         fisher_matrix, fisher_params = utils.load_fisher_matrix(fname)
         return fisher_matrix, fisher_params
 
@@ -1888,7 +1895,7 @@ class Data:
         return lbin
 
 
-    def fiducial_params(self, param_names=None, feedback=False):
+    def fiducial_params(self, param_names=None, feedback=False, use_class=False):
         """Returns a dictionary containing cosmological parameter names
         and their fiducial values, along with any other names and values
         (e.g., for CAMB accuracy parameters) that are used when
@@ -1904,6 +1911,8 @@ class Data:
             If `True`, the dictionary will contain the name of the 
             HMCode2020 + feedback model that is passed to CAMB, and the
             name and fiducial value of its baryonic feedback parameter.
+        use_class : bool, default=False
+            Whether CLASS is being used instead of CAMB.
 
         Returns
         -------
@@ -1919,10 +1928,10 @@ class Data:
 
         See also
         --------
-        fiducial_param_file
+        config.fiducial_params
         """
-        param_file = self.fiducial_param_file(feedback=feedback)
-        fid_params = theory.get_params(param_file=param_file)
+        fid_params = config.fiducial_params(feedback=feedback, use_class=use_class,
+                                            hd_data_version=self.hd_data_version)
         params = {}
         if param_names is not None:
             for param in param_names:

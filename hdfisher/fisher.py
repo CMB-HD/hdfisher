@@ -15,22 +15,89 @@ if mpi.rank > 0:
 
 # functions for derivatives of theory spectra with respect to params:
 
-def get_param_info(param_file, fisher_steps_file):
-    """Dictionaries of the fiducial cosmological parameters and their
-    step sizes  used to calculate the derivatives of the theory with
-    respect to each varied parameter.
-
-    If there is a parameter name in the `fisher_steps_file` without a
-    corresponding fiducial value in the `param_file`, that parameter will
-    not be included in the returned dictionaries.
+def get_step_sizes_dict(steps_dict_or_file=None, use_fiducial=True,
+                        use_class=False, fisher_steps_file=None):
+    """Get a dictionary of parameter step sizes used when calculating the
+    numerical derivatives for the Fisher matrices.
 
     Parameters
     ----------
-    param_file : str
-        Path to a YAML file that contains the varied parameter names and
-        values.
-    fisher_steps_file : str
-        Path to a YAML file holding the parameter step sizes.
+    steps_dict_or_file : str or dict of dict or None, default=None
+        Either a dictionary of parameter step sizes, or the path to a
+        YAML file containing the parameter step sizes. The format should
+        be the same as the returned `step_sizes` dictionary.
+    use_fiducial : bool, default=True
+        Whether to use the fiducial step sizes when no dictionary or file
+        is provided.
+    use_class : bool, default=False
+        Whether to use CLASS instead of CAMB.
+
+    Returns
+    -------
+    step_sizes : dict of dict
+        A dictionary with a key for each varied parameter.
+        For a given parameter name `param`, `step_sizes[param]` is a
+        dictionary with the following key, value pairs:
+        - `'step_size'` : the step size (`float`) for that parmeter
+        - `'step_type'` : either `'relative'` or `'absolute'`
+        If the step type is relative, the step size is given as a
+        fraction of the fiducial parameter value; e.g., for a relative
+        step size of 0.01, the parameter value is varied up/down by 1% of
+        its fiducial value.
+        Will return `None` if `steps_dict_or_file=None`,
+        `fisher_steps_file=None`, and `use_fiducial=False`.
+
+    Other Parameters
+    ----------------
+    fisher_steps_file : str or None, default=None
+        A path to a YAML file containing the parameter step sizes.
+        Available for backwards compatibility. Only used if
+        `steps_dict_or_file=None`.
+
+    See Also
+    --------
+    config.fiducial_fisher_step_sizes
+    """
+    step_sizes = None
+    if isinstance(steps_dict_or_file, dict):
+        step_sizes = steps_dict_or_file.copy()
+    elif steps_dict_or_file is not None: # assume it's a file name
+        step_sizes = utils.load_yaml(steps_dict_or_file)
+    elif fisher_steps_file is not None:
+        step_sizes = utils.load_yaml(fisher_steps_file)
+    elif use_fiducial:
+        step_sizes = config.fiducial_fisher_step_sizes(use_class=use_class)
+    return step_sizes
+
+
+
+def get_param_info(params, param_step_sizes, use_class=False):
+    """Dictionaries of the fiducial cosmological parameters and their
+    step sizes used to calculate the derivatives of the theory with
+    respect to each varied parameter.
+
+    If there is a parameter name in `param_step_sizes` without a
+    corresponding fiducial value in the `params`, that parameter will
+    not be included in the returned step sizes dictionary.
+
+    Parameters
+    ----------
+    params : str or dict 
+        Either a dictionary of parameter names and values, or the path to
+        a YAML file containing the parameter names and values.
+    param_step_sizes : str or dict of dict
+        Either a dictionary of parameter step sizes, or the path to a
+        YAML file containing the parameter step sizes. The dictionary
+        keys are the parameter names, and the values are dictionaries
+        with the following key, value pairs:
+        - `'step_size'` : the step size (`float`) for that parmeter
+        - `'step_type'` : either `'relative'` or `'absolute'`
+        If the step type is relative, the step size is given as a
+        fraction of the fiducial parameter value; e.g., for a relative
+        step size of 0.01, the parameter value is varied up/down by 1% of
+        its fiducial value.
+    use_class : bool, default=False
+        Whether to use CLASS instead of CAMB.
 
     Returns
     -------
@@ -46,40 +113,54 @@ def get_param_info(param_file, fisher_steps_file):
     ------
     If there is a step size provided for a parameter without a fiducial
     value.
-
-    Note
-    ----
-    The fiducial parameters are loaded from the YAML `param_file`, with
-    entries in the format `param_name: fiducial_value`. The step sizes
-    for a subset of the fiducial parameters are loaded from the YAML
-    `fisher_steps_file`. Each parameter (with a  `param_name`
-    corresponding to a fiducial `param_name`) gets its own block, with
-    two entries: `step_size`, with  a (float) value, and `step_type`,
-    with a (str) value of either `'abs'`  for 'absolute' or `'rel'` for
-    'relative'. If the step type is relative, the step size is assumed to
-    be a fraction of the fiducial value; e.g., a relative step size of
-    0.01 means increase/decrease the parameter value by 1% of its
-    fiducial value.
     """
-    # load fiducial params
-    fids = theory.get_params(param_file=param_file)
-    # load step sizes for some or all of them
-    with open(fisher_steps_file, 'r') as f:
-        step_info = yaml.safe_load(f)
+    # get fiducial params and step sizes:
+    fids = theory.get_param_dict(param_dict_or_file=params, use_class=use_class)
+    step_info = get_step_sizes_dict(steps_dict_or_file=param_step_sizes, use_class=use_class)
     # create a dict of absolute step sizes
     step_sizes = {}
     for param in step_info.keys():
         # make sure we have a fiducial value for that param
         if param not in fids.keys():
-            msg = (f"The parameter '{param}' in the `fisher_steps_file` will be "
-                   "ignored because there is no fiducial value in the `param_file`.")
+            msg = (f"The parameter '{param}' in `param_step_sizes` will be "
+                   "ignored because there is no fiducial value in `params`.")
             warnings.warn(msg)
         else:
             step = step_info[param]['step_size']
             if 'rel' in step_info[param]['step_type'].lower():
                 step *= fids[param]
             step_sizes[param] = step
+    # make sure there are no duplicate parameters:
+    fids = _remove_duplicate_params(fids, step_sizes)
     return fids, step_sizes
+
+
+def _remove_duplicate_params(params, step_sizes):
+    """If the `params` dictionary has two keys for a given parameter, one
+    that is the CAMB/CLASS parameter name and one that is the `hdfisher`
+    "alias" for that parameter, and there is a key for that parameter in
+    the `step_sizes` dict, remove the extra key from the `params`
+    dictionary. Returns only the `params` dictionary.
+
+    Note: we are assuming that, for every key in `step_sizes`, there is a
+    corresponding key in `params`.
+    """
+    # NOTE: for now, there is no conflict between CAMB and CLASS names
+    # for parameters with an "alias"; if this changes in the future,
+    # this function may need to be updated
+    if 'logA' in step_sizes:
+        params.pop('As', None)
+    elif 'As' in step_sizes:
+        params.pop('logA', None)
+    if 'theta' in step_sizes:
+        params.pop('cosmomc_theta', None)
+    elif 'cosmomc_theta' in step_sizes:
+        params.pop('theta', None)
+    if 'sum_m_ncdm' in step_sizes:
+        params.pop('m_ncdm', None)
+    elif 'm_ncdm' in step_sizes:
+        params.pop('sum_m_ncdm', None)
+    return params
 
 
 def get_varied_param_values(fids, step_sizes, include_fid=True):
@@ -130,9 +211,10 @@ def get_available_cmb_fisher_derivs(derivs_dir, use_H0=False):
     derivs_dir : str
         The directory containing the derivatives.
     use_H0 : bool, default=False
-        If `True`, look for derivatives that were calculated by passing `'H0'`
-        to CAMB when varying the other parameters, as opposed to passing
-        `'cosmomc_theta'`.
+        If `True`, look for derivatives that were calculated by passing
+        `'H0'` to CAMB or CLASS when varying the other parameters, as 
+        opposed to passing `'cosmomc_theta'` (for CAMB) or `theta_s_100`
+        (for CLASS).
 
     Returns
     -------
@@ -189,9 +271,10 @@ def get_available_bao_fisher_derivs(derivs_dir, use_H0=False):
     derivs_dir : str
         The directory containing the derivatives.
     use_H0 : bool, default=False
-        If `True`, look for derivatives that were calculated by passing `'H0'`
-        to CAMB when varying the other parameters, as opposed to passing
-        `'cosmomc_theta'`.
+        If `True`, look for derivatives that were calculated by passing
+        `'H0'` to CAMB or CLASS when varying the other parameters, as 
+        opposed to passing `'cosmomc_theta'` (for CAMB) or `theta_s_100`
+        (for CLASS).
 
     Returns
     -------
@@ -248,9 +331,10 @@ def load_cmb_fisher_derivs(derivs_dir, cmb_types=None, params=None,
     spectra : list of str, default=['tt', 'te', 'ee', 'bb', 'kk']
         A list of spectra to return for each combination of CMB type and parameter.
     use_H0 : bool, default=False
-        If `True`, look for derivatives that were calculated by passing `'H0'`
-        to CAMB when varying the other parameters, as opposed to passing
-        `'cosmomc_theta'`.
+        If `True`, look for derivatives that were calculated by passing
+        `'H0'` to CAMB or CLASS when varying the other parameters, as 
+        opposed to passing `'cosmomc_theta'` (for CAMB) or `theta_s_100`
+        (for CLASS).
     lmin, lmax : int, default=None
         If not `None`, return the derivatives in the multipole range from `lmin`
         to `lmax`. Otherwise use the full multipole range.
@@ -288,6 +372,8 @@ def load_cmb_fisher_derivs(derivs_dir, cmb_types=None, params=None,
     valid_cmb_types = ['lensed', 'unlensed', 'delensed']
     cols = config.theo_cols # all columns in derivs file
     all_cmb_types, all_params = get_available_cmb_fisher_derivs(derivs_dir, use_H0=use_H0)
+    if len(all_params) == 0:
+        raise FileNotFoundError(f"Cannot find any derivatives in {derivs_dir}")
     if cmb_types is None:
         cmb_types = all_cmb_types
     if params is None:
@@ -330,9 +416,10 @@ def load_bao_fisher_derivs(derivs_dir, params=None, use_H0=False):
     params : list of str, default=None
         A list of parameter names. If `None`, uses all available parameters.
     use_H0 : bool, default=False
-        If `True`, look for derivatives that were calculated by passing `'H0'`
-        to CAMB when varying the other parameters, as opposed to passing
-        `'cosmomc_theta'`.
+        If `True`, look for derivatives that were calculated by passing
+        `'H0'` to CAMB or CLASS when varying the other parameters, as
+        opposed to passing `'cosmomc_theta'` (for CAMB) or `theta_s_100`
+        (for CLASS).
 
 
     Returns
@@ -686,7 +773,7 @@ class FisherData:
     """Data needed to calculate Fisher matrices."""
     cov_spectra = ['tt', 'te', 'ee', 'bb', 'kk'] # in covmats
     
-    def __init__(self, exp='hd', hd_data_version='latest', 
+    def __init__(self, exp='hd', hd_data_version='latest', use_class=False, 
                  pol_only_lensing=False, hd_lmax=None, include_fg=True):
         """Initialization for a given experimental configuration.
         
@@ -703,6 +790,8 @@ class FisherData:
             default, the latest version is used. To reproduce the results
             in MacInnis et. al. (2023), use `hd_data_version='v1.0'`.
             See the `hdMockData` repository for a list of versions.
+        use_class : bool, default=False
+            Whether to use CLASS instead of CAMB.
             
         Other Parameters
         ----------------
@@ -742,9 +831,26 @@ class FisherData:
         self.data = dataconfig.Data(hd_data_version=hd_data_version)
         self.hd_data_version = self.data.hd_data_version
         self.exp = self.data._check_cmb_exp(exp)
-        
-        self.cmb_types = ['lensed', 'delensed', 'unlensed'] # for theory spectra
+        self.use_class = use_class
+
         self.cov_cmb_types = self.data.cov_cmb_types[self.exp].copy() # for covmats
+        self.cmb_types = ['lensed', 'delensed', 'unlensed'] # for theory spectra
+        if self.use_class:
+            # warn user that delensing isn't an option with CLASS:
+            msg = ("Delensed power spectra will not be used, because "
+                   "CLASS does not provide a way to compute it.")
+            if 'delensed' in self.cov_cmb_types:
+                if 'lensed' not in self.cov_cmb_types:
+                    msg = (f"{msg} NOTE: there is no lensed (or unlensed) "
+                           f"covariance matrix available for `exp='{self.exp}'`,"
+                           " so a Fisher matrix cannot be computed for the given"
+                           " experimental configuration, but you may still"
+                           " calculate the numerical derivatives of the theory"
+                           " with respect to the parameters.")
+                self.cov_cmb_types.remove('delensed')
+            self.cmb_types = ['lensed', 'unlensed']
+            warnings.warn(msg)
+            
         
         # multipole ranges and binning:
         self.ell_ranges = deepcopy(self.data.ell_ranges[self.exp])
@@ -787,6 +893,9 @@ class FisherData:
             cmb_type = self.cov_cmb_types[0]
             warnings.warn(f"There is only a {cmb_type} covariance matrix "
                           f"available for {exp = } and {hd_data_version = }.")
+        elif len(self.cov_cmb_types) == 0:
+            warnings.warn(f"There are no covariance matrices available for "
+                          f"{exp = }, {hd_data_version = }, and {use_class = }.")
         
         
     def covmat(self, cmb_type='delensed'):
@@ -797,15 +906,18 @@ class FisherData:
         return cov
 
 
+
+# TODO: update note about H0 vs theta in docstring 
+
 class Fisher(FisherData):
     """Calculate new Fisher derivatives and matrices from the mock CMB
     and BAO covariance matrices provided with `hdfisher`.
     """
 
-    def __init__(self, fisher_dir, param_file=None, fisher_steps_file=None,
+    def __init__(self, fisher_dir, fiducial_params=None, step_sizes=None,
                  fisher_params=None, use_H0=False, feedback=False,
-                 use_class=False, #TODO
-                 overwrite=False, **kwargs):
+                 use_class=False, overwrite=False,
+                 param_file=None, fisher_steps_file=None, **kwargs):
         """Initialization for a given experimental configuration and set
         of parameters to be included in the Fisher matrix.
 
@@ -816,102 +928,120 @@ class Fisher(FisherData):
             derivatives used to calculate the Fisher matrix, and the
             calculated Fisher matrices, will be saved. The directory will
             be created if it does not exist.
-        param_file : str or None, default=None
-            The name (including the full path) of a YAML file containing
-            the names and fiducial values of cosmological parameters used
-            in the theory calculation, and any other names that can be
-            passed to the CAMB function `camb.set_params()` (e.g.,
-            accuracy parameters). Each entry in the file should have its
-            own line in the format `param_name: value`.
-            If `param_file=None`, the default file included with
-            `hdfisher` is used.
-        fisher_steps_file : str or None, default=None
-            The name (including the full path) of a YAML file containing
-            the step sizes to use when calculating the derivatives of the
-            theory with respect to each parameter included in the Fisher
-            matrix. Each parameter should have its own block with two
-            entries: a `step_size` (float), giving the step size to use
-            for the numerical derivatives when varying the parameter up
-            or down; and the `step_type` (str), which should be
-            `'absolute'`, or `'relative'` if the `step_size` was given as
-            a fraction of the fiduical parameter value (e.g., a relative
-            step size of 0.01 corresponds to an absolute step size of 1%
-            of the fiducial value). Each parameter in the
-            `fisher_steps_file` must have a fiducial value specified in
-            the `param_file`.
+        fiducial_params : str or dict or None, default=None
+            Either a dictionary of parameter names and values, or the
+            path to a YAML file containing the parameter names and
+            values. Must include any varied parameter, and may also
+            include fixed parameters (including accuracy settings, etc.
+            passed to CAMB or CLASS).
+            If `fiducial_params=None` (and `param_file=None`), we will
+            first try to load in a previously-saved parameter file from
+            the `fisher_dir`; if no such file exists, the fiducial set of
+            parameters for  `hdfisher` is used.
+        step_sizes : str or dict of dict or None, default=None
+            Either a dictionary of parameter step sizes, or the path to a
+            YAML file containing the parameter step sizes. The dictionary
+            keys are the parameter names, and the values are dictionaries
+            with the following key, value pairs:
+            - `'step_size'` : the step size (`float`) for that parmeter
+            - `'step_type'` : either `'relative'` or `'absolute'`
+            If the step type is relative, the step size is given as a
+            fraction of the fiducial parameter value; e.g., for a
+            relative step size of 0.01, the parameter value is varied up
+            or down by 1% of its fiducial value.
+            If `step_sizes=None` (and `fisher_steps_file=None`), we will
+            first try to load any previously-saved step sizes file from
+            the `fisher_dir`; if no such file exists, the default
+            `hdfisher` step sizes are used.
         fisher_params : None or list of str, default=None
-            An optional list of parameter names to use in the
-            calculation, which must be a sub-set of the parameters in the
-            `fisher_steps_file`. If `None`, all parameters in the
-            `fisher_steps_file` are used.
+            An optional list of varied parameter names; a step size must
+            be provided for each. If `None`, all parameters with a step
+            size are used.
         use_H0 : bool, default=False
-            Used when the `fisher_steps_file` (or the `fisher_params`
-            list) contains both the Hubble constant `'H0'` and the
-            cosmoMC approximation to the angular scale of the sound
-            horizon at last scattering, `cosmomc_theta` (or `theta`,
-            which is defined in `hdfisher` as `100 * cosmomc_theta`).
-            Only one of these parameters can be used in the theory
-            calculation. If `use_H0=True`, `'H0'` is used; otherwise,
-            `'cosmomc_theta'` is used.
+            Used when the set of fiducial parameters contains both the
+            Hubble constant `'H0'` and the angular scale of the sound
+            horizon at last scattering, either `cosmomc_theta` (or
+            `theta`, which is defined in `hdfisher` as
+            `100 * cosmomc_theta`) in CAMB or `theta_s_100` in CLASS.
+            Only one of these parameters can included in the same Fisher
+            matrix. If `use_H0=True`, the Hubble constant will be used;
+            otherwise, `cosmomc_theta` or `theta_s_100` is used.
         feedback : bool, default=False
-            Used if `param_file=None` and/or `fisher_steps_file=None`. If
-            `feedback=True`, the default `param_file` specifies the
-            HMCode2020 + feedback non-linear model to use for the theory
-            calculation, and includes a fiducial value for its feedback
-            parameter, with a step size given in the default
-            `fisher_steps_file`. If `False`, the  CDM-only model with
-            HMCode2016 is used.
+            Used only if the fiducial parameters and step sizes were not
+            passed. If `feedback=True`, the default set of fiducial
+            parameters will use the HMCode2020 + baryonic feedback
+            non-linear model for the theory calculation, and includes a
+            fiducial value for its feedback parameter, which will be
+            varied by default. If `False`, the HMCode2016 CDM-only model
+            is used.
+        use_class : bool, default=False
+            Whether to use CLASS instead of CAMB.
         overwrite : bool, default=False
             If `False`, any Fisher derivatives or matrices that are saved
-            in the `fisher_dir` will be loaded. Otherwise, if `True`, the
-            results will be re-calculated, and their files will be
-            over-written by the new calculations.
-        **kwargs : dict
+            in the `fisher_dir` will be loaded instead of re-calculated.
+            Otherwise, if `True`, the results will be re-calculated, and
+            any existing files will be over-written by the new
+            calculations.
+        **kwargs : dict, optional
             Keyword arguments accepted by the `FisherData` class for the
             experimental configuration, including the `exp` name and the
             `hd_data_version`.
 
+        Other Parameters
+        ----------------
+        param_file : str or None, default=None
+            Path to a YAML file containing the fiducial parameter names
+            and values. Allowed for backwards compatibility; use
+            `fiducial_params` instead. Only used if `fiducial_params=None`.
+        fisher_steps_file : str or None, default=None
+            Path to a YAML file containing the parameter step sizes.
+            Allowed for backwards compatibility; use `step_sizes` instead.
+            Only used if `step_sizes=None`.
+
         Raises
         ------
         ValueError
-            If a set of invalid experimental parameters were passed, or
-            if the `fisher_steps_file` contains a parameter that wasn't
-            given in the `param_file`.
+            If a set of invalid experimental parameters were passed.
 
         Notes
         -----
-        Copies of the `param_file` and `fisher_steps_file` will be saved
-        in the `fisher_dir`.
+        Copies of the fiducial parameters and step sizes will be saved in
+        the `fisher_dir`.
+
+        The value of `use_H0` passed during initialization determines the
+        default set of varied parameters; many of the methods defined
+        here also have a `use_H0` flag that will override this default.
 
         If you would like the option to switch between using `'H0'` and
-        `'cosmomc_theta'` in your Fisher matrices, you will need to
-        calculate two sets of Fisher derivatives: one that contains
-        derivatives of the theory with respect to `'cosmomc_theta'` and
-        fixes it when varying the other parameters, and a second that
-        uses `'H0'` instead. You should (re-)initialize the `Fisher`
-        class twice, with `use_H0=False` (to do the first calculation)
-        and then again with `use_H0=True` (to do the second calculation),
-        with all other arguments unchanged. Then, you may use either
-        parameter by setting the `use_H0` flag in the `get_fisher`
-        method, which will override the value set here.
+        `'cosmomc_theta'` or `'theta_s_100'` in your Fisher matrices, you
+        will need to calculate two sets of Fisher derivatives (i.e., the
+        numerical derivatives of the theory with respect to each varied
+        parameter): one where `'H0'` is varied, or held fixed while the
+        other parameters are varied; and one where `'cosmomc_theta'` or
+        `'theta_s_100'` is varied, or held fixed while the other
+        parameters are varied. This can be done by calling
+        `calculate_fisher_derivs` twice, once with `use_H0=False` and
+        once with `use_H0=True`. Then, you may use either parameter by
+        passing `use_H0` to the `get_fisher` method.
 
         See Also
         --------
-        config.fiducial_param_file : Default `param_file`
-        config.fiducial_fisher_steps_file : Default `fisher_steps_file`
+        config.fiducial_params : Default fiducial parameters.
+        config.fiducial_fisher_step_sizes : Default step sizes.
         """
+        kwargs = {**kwargs, 'use_class': use_class}
         super().__init__(**kwargs)
         self.fisher_dir = fisher_dir
         self.overwrite = overwrite
         self.use_H0 = use_H0
 
         # get the fiducial parameter values and step sizes:
-        self.param_file = param_file
-        if self.param_file is None:
-            self.param_file = self.get_param_file(feedback=feedback)
-        if fisher_steps_file is None:
-            fisher_steps_file = self.get_fisher_steps_file(feedback=feedback)
-        self.fid_params, self.step_sizes = get_param_info(self.param_file, fisher_steps_file)
+        params = self._get_fid_params(fiducial_params=fiducial_params,
+                                      param_file=param_file,
+                                      feedback=feedback)
+        step_sizes = self._get_step_sizes(step_sizes=step_sizes,
+                                          fisher_steps_file=fisher_steps_file)
+        self.fid_params, self.step_sizes = get_param_info(params, step_sizes)
 
         # create the output directories, and save a copy of the
         # input param and step sizes files:
@@ -928,57 +1058,73 @@ class Fisher(FisherData):
             self.save_param_steps_values()
         mpi.comm.barrier()
 
+        # assume only one of the `theta_name`'s and only one of the
+        # `H0_name`s are in the `step_sizes` dict; if not, we will
+        # run into bigger issues anyway when calculating the theory:
+        self._H0_name = None
+        self._theta_name = None
+        for H0_name in ['H0', 'h']:
+            if H0_name in self.step_sizes:
+                self._H0_name = H0_name
+        for theta_name in ['theta', 'cosmomc_theta', 'theta_s_100']:
+            if theta_name in self.step_sizes:
+                self._theta_name = theta_name
+        self._has_H0 = (self._H0_name is not None)
+        self._has_theta = (self._theta_name is not None)
+
         # varied parameters:
-        self._has_H0 = ('H0' in self.step_sizes)
-        self._H0_name = 'H0'
-        if 'theta' in self.step_sizes:
-            self._has_theta = True
-            self._theta_name = 'theta'
-        elif 'cosmomc_theta' in self.step_sizes:
-            self._has_theta = True
-            self._theta_name = 'cosmomc_theta'
-        else:
-            self._has_theta = False
-            self._theta_name = None
         self.all_varied_params = list(self.step_sizes.keys()) # all
         self.fisher_params, _ = self.check_H0_theta() # default list
 
 
     # functions called during initialization:
 
-    def get_param_file(self, feedback=False):
-        """Returns the file name of the YAML file that contains the
-        fiducial cosmological parameter names and values, and any other
-        CAMB settings, if no `param_file` was given during initialization.
-        """
-        # look for an input param file in the output directory:
-        input_param_file = os.path.join(self.fisher_dir, 'fiducial_params.yaml')
-        if os.path.exists(input_param_file) and (not self.overwrite):
-            param_file = input_param_file
-        else:
-            param_file = config.fiducial_param_file(feedback=feedback,
-                                                    hd_data_version=self.hd_data_version)
-        return param_file
+    def param_file_name(self):
+        """Path to the parameter file saved in the `fisher_dir`."""
+        fname = os.path.join(self.fisher_dir, 'fiducial_params.yaml')
+        return fname
 
 
-    def get_fisher_steps_file(self, feedback=False):
-        """Returns the file name of the YAML file that contains the
-        parameter step sizes to be used when calculating the derivatives
-        of the theory, if no `fisher_steps_file` was given during
-        initialization.
-        """
-        # look for an input param file in the output directory:
-        input_steps_file = os.path.join(self.fisher_dir, 'step_sizes.yaml')
-        if os.path.exists(input_steps_file) and (not self.overwrite):
-            fisher_steps_file = input_steps_file
-        else:
-            fisher_steps_file = config.fiducial_fisher_steps_file(feedback=feedback)
-        return fisher_steps_file
+    def step_sizes_file_name(self):
+        """Path to the step sizes file saved in the `fisher_dir`."""
+        fname = os.path.join(self.fisher_dir, 'step_sizes.yaml')
+        return fname
+
+
+    def _get_fid_params(self, fiducial_params=None, param_file=None, feedback=False):
+        # if `fiducial_params` was provided, use that;
+        # or if `param_file` was provided, use that;
+        # or if a param file was previously saved, use that;
+        # otherwise, get the correct set of default fiducial parameters:
+        params_saved = os.path.exists(self.param_file_name())
+        if (param_file is None) and params_saved and (not self.overwrite):
+            param_file = self.param_file_name()
+        params = theory.get_param_dict(param_dict_or_file=fiducial_params, use_fiducial=False,
+                                      use_class=self.use_class, param_file=param_file)
+        if params is None:
+            params = config.fiducial_params(feedback=feedback, use_class=self.use_class,
+                                            hd_data_version=self.hd_data_version)
+        return params
+
+
+    def _get_step_sizes(self, step_sizes=None, fisher_steps_file=None):
+        # if `step_sizes` was provided, use that;
+        # or if `fisher_steps_file` was provided, use that;
+        # or if a file of step sizes was previously saved, use that;
+        # otherwise, get the correct set of default step sizes:
+        step_sizes_saved = os.path.exists(self.step_sizes_file_name())
+        if (fisher_steps_file is None) and step_sizes_saved and (not self.overwrite):
+            fisher_steps_file = self.step_sizes_file_name()
+        step_sizes = get_step_sizes_dict(steps_dict_or_file=step_sizes,
+                                         use_fiducial=True,
+                                         use_class=self.use_class,
+                                         fisher_steps_file=fisher_steps_file)
+        return step_sizes
 
 
     def save_param_steps_values(self):
-        """Saves a copy of the `param_file` and `fisher_steps_file` in 
-        the `fisher_dir` set during initialization.
+        """Saves files of the fiducial parameters and step sizes in the
+        `fisher_dir` passed during initialization.
         """
         param_values = self.fid_params.copy()
         param_steps = self.step_sizes.copy()
@@ -990,13 +1136,9 @@ class Fisher(FisherData):
             # all step sizes should be floating point numbers
             param_steps[param] = {'step_size': float(step_size), 'step_type': 'absolute'}
         # save the files
-        if mpi.rank == 0: 
-            fid_params_fname = os.path.join(self.fisher_dir, 'fiducial_params.yaml')
-            with open(fid_params_fname, 'w') as f:
-                yaml.dump(param_values, f,  default_flow_style=False)
-            step_sizes_fname = os.path.join(self.fisher_dir, 'step_sizes.yaml')
-            with open(step_sizes_fname, 'w') as f:
-                yaml.dump(param_steps,  f,  default_flow_style=False)
+        if mpi.rank == 0:
+            utils.save_yaml(self.param_file_name(), param_values, overwrite=self.overwrite)
+            utils.save_yaml(self.step_sizes_file_name(), param_steps, overwrite=self.overwrite)
 
 
     def check_H0_theta(self, params=None, use_H0=None):
@@ -1037,29 +1179,18 @@ class Fisher(FisherData):
         # we need to choose between H0 or theta, if both are in `fisher_params`;
         #  the choice is based on the `use_H0` flag:
         use_H0 = self.use_H0 if (use_H0 is None) else use_H0
-        params_list, step_sizes = self.check_H0_theta(use_H0=use_H0)
-        all_param_values = get_varied_param_values(self.fid_params, step_sizes)
+        _, step_sizes = self.check_H0_theta(use_H0=use_H0)
         if not self.overwrite: # don't re-compute theory and derivatives
-            param_values = []
-            for param_info in all_param_values:
-                param, value = param_info
-                if param is None: # fiducial case
-                    step_direction = None
-                else:
-                    step_direction = 'up' if (value > self.fid_params[param]) else 'down'
-                # check if CMB and BAO theory is already saved
-                bao_fname = config.fisher_bao_theo_fname(self.theo_dir, param,
-                                                         step_direction, use_H0=use_H0)
-                theo_fnames = [bao_fname]
+            for param in step_sizes:
+                # check if derivatives have been saved for this param:
+                deriv_fnames = [config.fisher_bao_deriv_fname(self.derivs_dir, param, use_H0=use_H0)]
                 for cmb_type in self.cmb_types:
-                    fname = config.fisher_cmb_theo_fname(self.theo_dir, cmb_type, param,
-                                                         step_direction, use_H0=use_H0)
-                    theo_fnames.append(fname)
-                if not all([os.path.exists(fname) for fname in theo_fnames]):
-                    param_values.append((param, value))
-        else:
-            param_values = all_param_values
-        mpi.comm.barrier()
+                    fname = config.fisher_cmb_deriv_fname(self.derivs_dir, cmb_type, param, use_H0=use_H0)
+                    deriv_fnames.append(fname)
+                if all([os.path.exists(fname) for fname in deriv_fnames]):
+                    step_sizes.pop(param)
+        param_values = get_varied_param_values(self.fid_params, step_sizes)
+        mpi.comm.barrier() # make sure everyone agrees on what has not been saved
         return param_values
 
     
@@ -1115,9 +1246,10 @@ class Fisher(FisherData):
         # do the calculation:
         use_H0 = self.use_H0 if (use_H0 is None) else use_H0
         theolib = theory.Theory(self.theo_lmax, self.theo_dir,
-                                param_file=self.param_file, use_H0=use_H0,
+                                params=self.fid_params, use_H0=use_H0,
                                 nlkk=self.nlkk, recon_lmin=self.Lmin,
-                                recon_lmax=self.Lmax, **cosmo_params)
+                                recon_lmax=self.Lmax, use_class=self.use_class,
+                                **cosmo_params)
         cmb_theo = theolib.get_theory(save=False, output_lmax=self.lmax)
         z = dataconfig.desi_redshifts()
         rs_dv = theolib.get_rs_dv(z, save=False)
@@ -1571,6 +1703,9 @@ class Fisher(FisherData):
         --------
         dataconfig.Data.load_example_hd_fisher
         """
+        # TODO:
+        if self.use_class:
+            raise NotImplementedError
         fisher_matrix, fisher_params = self.data.load_example_hd_fisher(cmb_type=cmb_type, 
                                                                         use_H0=use_H0, 
                                                                         with_desi=with_desi)

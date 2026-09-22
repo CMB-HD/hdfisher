@@ -4,6 +4,7 @@ import logging
 import logging.handlers
 import warnings
 import numpy as np
+import yaml
 from . import mpi
 
 
@@ -34,7 +35,7 @@ def cl2dl(cl, ells):
 
     See Also
     --------
-    utils.cl2dl_dict
+    cl2dl_dict
     """
     lfact = ells * (ells  + 1) / (2 * np.pi)
     dl = cl * lfact
@@ -75,7 +76,7 @@ def cl2dl_dict(cls, ells=None, cmb_keys=['tt', 'te', 'ee', 'bb']):
 
     See Also
     --------
-    utils.cl2dl
+    cl2dl
     """
     if ells is None:
         if 'ells' in cls.keys():
@@ -183,6 +184,49 @@ def save_to_file(fname, data, keys=None, col_names=None, extra_header_info=None)
     np.savetxt(fname, np.column_stack(data_cols), header=header)
 
 
+def load_yaml(fname):
+    """Return a dictionary loaded from a YAML file.
+
+    Parameters
+    ----------
+    fname : str
+        The YAML file name.
+
+    Returns
+    -------
+    data : dict
+        The dictionary loaded from the YAML file.
+
+    See Also
+    --------
+    save_yaml
+    """
+    with open(fname, 'r') as f:
+        data = yaml.safe_load(f)
+    return data
+
+
+def save_yaml(fname, save_dict, overwrite=False):
+    """Save a dictionary to a YAML file.
+
+    Parameters
+    ----------
+    fname : str
+        The file name, including the file extension.
+    save_dict : dict
+        The dictionary to save.
+    overwrite : bool, default=False
+        Whether to overwrite the file, if it already exists.
+
+    See Also
+    --------
+    load_yaml
+    """
+    if overwrite or (not os.path.exists(fname)):
+        with open(fname, 'w') as f:
+            yaml.dump(save_dict, f,  default_flow_style=False)
+
+
 def set_dir(dirname):
     """Given the path to a directory, check if it exists. If not, create a 
     new directory.
@@ -260,8 +304,129 @@ def load_fisher_matrix(fname):
     return fisher_matrix, params
 
 
-# ---------- binning ---------- 
+# ---------- parameters ---------- 
 
+def add_param_aliases(params_dict, replace=True, use_class=False):
+    """Add the `hdfisher` parameter "aliases" to a dictionary of CAMB
+    or CLASS parameters. By default, `hdfisher` varies these "aliases"
+    instead of the parameters being replaced.
+    
+    Parameters
+    ----------
+    params_dict : dict
+        A dictionary of parameter names and values. May include any
+        parameter names that can be passed to CAMB (if `use_class=False`)
+        or CLASS (if `use_class=True`).
+    replace : bool, default=True
+        If `replace=True`, for each parameter with an "alias", the
+        corresponding CAMB/CLASS parameter name will be removed from the
+        dictionary. If `replace=False`, these parameters will not be
+        removed.
+    use_class : bool, default=False
+        Whether CLASS is being used instead of CAMB.
+        
+    Returns
+    -------
+    params_dict : dict
+        The dictionary of parameter names and values, with keys added for
+        each parameter "alias".
+        
+    See Also
+    --------
+    add_camb_param_aliases, add_class_param_aliases 
+    remove_param_aliases
+    """
+    # TODO
+    if use_class:
+        raise NotImplementedError
+    else:
+        params_dict = add_camb_param_aliases(params_dict, replace=replace)
+    return params_dict
+
+
+def remove_param_aliases(params_dict, use_class=False):
+    """Replace the `hdfisher` parameter "aliases" with the corresponding
+    CAMB or CLASS parameters. 
+    
+    Parameters
+    ----------
+    params_dict : dict
+        A dictionary of parameter names and values. May include any
+        parameter names that can be passed to CAMB (if `use_class=False`)
+        or CLASS (if `use_class=True`) and the `hdfisher` parameter 
+        "aliases".
+    use_class : bool, default=False
+        Whether CLASS is being used instead of CAMB.
+        
+    Returns
+    -------
+    params_dict : dict
+        The dictionary of CAMB/CLASS parameter names and values.
+        
+    See Also
+    --------
+    remove_camb_param_aliases, remove_class_param_aliases 
+    add_param_aliases
+    """
+    # TODO
+    if use_class:
+        raise NotImplementedError
+    else:
+        params_dict = remove_camb_param_aliases(params_dict)
+    return params_dict
+
+
+def add_camb_param_aliases(params_dict, replace=True):
+    """Add the `hdfisher` parameter "aliases" to a dictionary of CAMB
+    parameters; these aliases are:
+    - `'theta'` instead of `'cosmomc_theta'` (cosmoMC theta times 100)
+    - `'logA'` instead of `'As'` (ln(10^10 As))
+    Note that, by default, `hdfisher` varies these "aliases" instead of
+    the parameters being replaced.
+
+    If `replace=True`, `'cosmomc_theta'` and `'As'` are removed from the
+    dictionary.
+    """
+    if 'cosmomc_theta' in params_dict:
+        if replace:
+            cosmomc_theta = params_dict.pop('cosmomc_theta')
+        else:
+            cosmomc_theta = params_dict['cosmomc_theta']
+        params_dict['theta'] = 100 * cosmomc_theta
+    if 'As' in params_dict:
+        if replace:
+            As = params_dict.pop('As')
+        else:
+            As = params_dict['As']
+        params_dict['logA'] = float(np.log(1e10 * As))
+    return params_dict
+
+
+def remove_camb_param_aliases(params_dict):
+    """Remove the `hdfisher` parameter "aliases" from a dictionary of
+    CAMB parameters, replacing them with the parameters that can be
+    passed to CAMB:
+    - Replaces `'theta'` with `'cosmomc_theta`'
+    - Replaces `'logA'` with `'As'`
+    """
+    if 'theta' in params_dict:
+        params_dict['cosmomc_theta'] = params_dict.pop('theta') / 100
+    if 'logA' in params_dict:
+        params_dict['As'] = float(np.exp(params_dict.pop('logA')) * 1e-10)
+    return params_dict
+
+
+def add_class_param_aliases(params_dict, replace=True):
+    # TODO: will add `sum_m_ncdm` given `m_ncdm`
+    raise NotImplementedError
+
+
+def remove_class_param_aliases(params_dict):
+    # TODO: will replace `sum_m_ncdm` with `m_ncdm`
+    raise NotImplementedError
+
+
+# ---------- binning ---------- 
 
 def bin_info(bin_edges, lmin=None, lmax=None):
     """Given an array of `bin_edges`, return arrays of the `lower` and 
@@ -396,8 +561,8 @@ def bin1d(ells, cls, bin_edges, lmin=None, lmax=None):
 
     See Also
     --------
-    utils.binning_matrix
-    utils.bin1d
+    binning_matrix
+    bin1d
     """
     # get lmin, lmax if not provided
     if lmin is None:

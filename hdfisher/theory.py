@@ -8,33 +8,61 @@ import camb
 from . import mpi, utils, config
 
 
-# ----- cosmological parameters: -----
+# ----- theory parameters: -----
 
-def get_valid_param_files(param_file_dir):
-    """Returns a list of file names within the `param_file_dir` that may
-    contain sets of cosmological parameter names and values. 
-    
+def get_param_dict(param_dict_or_file=None, use_fiducial=True,
+                   param_aliases=True, use_class=False,
+                   param_file=None):
+    """Get a dictionary of parameter names and values.
+
     Parameters
     ----------
-    param_file_dir : str
-        The absolute path to the directory holding the parameter files.
+    param_dict_or_file : str or dict or None, default=None
+        Either a dictionary of parameter names and values, or the path to
+        a YAML file containing the parameter names and values.
+    use_fiducial : bool, default=True
+        Whether to use the fiducial set of parameters when no parameter
+        dictionary or file is provided.
+    param_aliases : bool, default=True
+        Whether to add the `hdfisher` parameter "aliases" to the dictionary.
+    use_class : bool, default=False
+        Whether to use CLASS instead of CAMB.
 
     Returns
     -------
-    param_files : list of str
-        A list of names of different yaml files found in the `param_file_dir`.
+    param_dict : dict or None
+        Dictionary of CAMB or CLASS parameter names and values, and any
+        `hdfisher` parameter "aliases" if `param_aliases=True`.
+        Will return `None` if `param_dict_or_file=None`,
+        `param_file=None`, and `use_fiducial=False`.
+
+    Other Parameters
+    ----------------
+    param_file : str or None, default=None
+        A path to a YAML file containing the parameter names and values.
+        Available for backwards compatibility. Only used if
+        `param_dict_or_file=None`.
+
+    See Also
+    --------
+    config.fiducial_params
+    config.add_param_aliases
     """
-    files = os.listdir(param_file_dir)
-    param_files = []
-    for f in files:
-        name, ext = os.path.splitext(f)
-        if ('yaml' in ext.lower()) or ('yml' in ext.lower()):
-            param_files.append(f)
-    # warn the user if we didn't find anything
-    if len(param_files) < 1:
-        msg = f"Couldn't find any valid parameter YAML files in {param_file_dir}."
-        warnings.warn(msg)
-    return param_files
+    param_dict = None
+    if isinstance(param_dict_or_file, dict):
+        param_dict = param_dict_or_file.copy()
+    elif param_dict_or_file is not None: # assume it's a file name
+        param_dict = utils.load_yaml(param_dict_or_file)
+    elif param_file is not None:
+        param_dict = utils.load_yaml(param_file)
+    elif use_fiducial:
+        param_dict = config.fiducial_params(use_class=use_class)
+    if param_dict is not None:
+        if param_aliases:
+            param_dict = utils.add_param_aliases(param_dict, use_class=use_class, replace=False)
+        else:
+            param_dict = utils.remove_param_aliases(param_dict, use_class=use_class)
+    return param_dict
 
 
 def get_params(param_file=None):
@@ -53,204 +81,297 @@ def get_params(param_file=None):
     -------
     params : dict of float
         A dictionary with the parameter names as keys holding their values.
+
+    Notes
+    -----
+    Included for backwards compatibility.
     """
     if param_file is None:
-        # get the fiducial parameter file
-        param_file = config.fiducial_param_file()
-    if not os.path.exists(param_file):
-        param_set_dir, param_set_fname = os.path.split(param_file)
-        if len(param_set_dir) > 1:
-            param_set_name = os.path.splitext(param_set_fname)[0]
-            # existing options
-            param_files = get_valid_param_files(param_set_dir)
-            # check if argument matches
-            if param_set_fname not in param_files:
-                err_msg = f"You passed `param_file = '{param_file}'`, but the only files found in the directory `{param_set_dir}` are: {param_files}."
-                raise FileNotFoundError(err_msg)
-        else:
-            err_msg = f"Cannot find the `param_file` '{param_file}.'"
-            raise FileNotFoundError(err_msg)
-    # now get the params
-    with open(param_file, 'r') as f:
-        params = yaml.safe_load(f)
+        params = config.fiducial_params()
+    else:
+        params = utils.load_yaml(param_file)
     return params
 
 
+def set_cosmo_params(params=None, use_H0=False, use_class=False,
+                     param_file=None, **cosmo_params):
+    """Load the parameter values saved in the `param_file` and return a
+    dictionary that can be passed to either CAMB or CLASS (see the "Notes"
+    section below).
 
-def set_cosmo_params(param_file=None, use_H0=False, **cosmo_params):
-    """Load the parameter values saved in the `param_file` and return a 
-    dictionary that can be passed to `camb.set_params()`.
-    
     Parameters
     ----------
-    param_file : str, default=None
-        The file name, including the absolute path, of a YAML file that
-        contains the parameter names and values that can be passed to the 
-        CAMB `camb.set_params()` function. If not provided, the 
-        default/fiducial values are used (including accuracy parameters).
+    params : str or dict or None, default=None
+        Either a dictionary of parameter names and values, or the path to
+        a YAML file containing the parameter names and values. If not
+        provided (and a `param_file` is also not provided), the default
+        set of fiducial parameters is used.
     use_H0 : bool, default=False
-        Pass the Hubble constant instead of CosmoMC theta to CAMB, if both are 
-        present in the parameter file.
+        Whether to use the Hubble constant instead of `cosmomc_theta`
+        (for CAMB) or `theta_s_100` (for CLASS).
+    use_class : bool, default=False
+        Whether to use CLASS instead of CAMB.
     **cosmo_params : dict of float
-        An optional dictionary of parameter names and values to override 
-        the values loaded from the YAML file, or add additional parameters.
-   
+        An optional dictionary of parameter names and values to override
+        the values passed, or add additional parameters.
+
     Returns
     -------
     p : dict
         A dictionary of the parameter names and values.
 
-    Note
-    ----
-    The returned dictionary does not contain a key `lmax` for the maximum
-    multipole for CAMB to use; this is added in the function 
-    `theory.set_camb_params`.
-    """
-    params_dict = get_params(param_file=param_file).copy()
-    p = {**params_dict, **cosmo_params}
-    # if both H0 and theta are specified, can only provide one
-    has_hubble = False
-    has_theta = False
-    if 'H0' in p.keys():
-        has_hubble = (p['H0'] is not None)
-    if 'theta' in p.keys():
-        theta_key = 'theta'
-        has_theta = (p[theta_key] is not None)
-    elif 'cosmomc_theta' in p.keys():
-        theta_key = 'cosmomc_theta'
-        has_theta = (p[theta_key] is not None)
-    if (not has_hubble) and (not has_theta):
-        err_msg = f"You must provide a value for either `'H0'` or `'cosmomc_theta'` to CAMB; neither was found in the `param_file` '{param_file}'."
-        raise ValueError(err_msg)
-    elif (use_H0 or not has_theta) and has_hubble:
-        p['cosmomc_theta'] = None
-    else:
-        p['H0'] = None
-        p['cosmomc_theta'] = p[theta_key]
-        if p['cosmomc_theta'] > 0.1: # need theta, not 100 * theta
-            p['cosmomc_theta'] /= 100
-        if use_H0:
-            msg = f"You passed `use_H0 = True`, but could not find a value for H0 in the `param_file` '{param_file}'. Passing CosmoMC theta to CAMB instead of H0."
-            warnings.warn(msg)
-    if 'theta' in p.keys():
-        p.pop('theta', None)
-    # camb wants As instead of logA
-    if 'As' not in p.keys():
-        p['As'] = None
-    if ('logA' in p.keys()) and (p['As'] is None):
-        p['As'] = np.exp(p['logA'])/1.e10
-    if 'logA' in p.keys():
-        p.pop('logA', None)
-    # baryonic feedback
-    if ('hmcode_version' not in p) and ('halofit_version' not in p):
-        p['hmcode_version'] = 'mead2016'
-    else:
-        if 'hmcode_version' in p:
-            p['halofit_version'] = p['hmcode_version']
-            p.pop('hmcode_version', None)
-    if 'HMCode_A_baryon' not in p:
-        p['HMCode_A_baryon'] = 3.13
-    if 'HMCode_eta_baryon' not in p:
-        p['HMCode_eta_baryon'] = 0.603
-    if 'HMCode_logT_AGN' not in p:
-        if 'logTagn' in p:
-            p['HMCode_logT_AGN'] = p['logTagn']
-            p.pop('logTagn', None)
-        else:
-            p['HMCode_logT_AGN'] = 7.8
-    return p
-
-
-def set_camb_params(lmax, param_file=None, use_H0=False, **cosmo_params):
-    """Returns a `CAMBparams` instance with the requested cosmological and accuracy parameters.
-    
-    Parameters
-    ----------
-    lmax : int
-        The maximum multipole for the theory spectra.
-    param_file : str, default=None
-        The file name, including the absolute path, of a YAML file that
-        contains the parameter names and values that can be passed to the 
-        CAMB `camb.set_params()` function. If not provided, the 
-        default/fiducial values are used (including accuracy parameters).
-    use_H0 : bool, default=False
-        Pass the Hubble constant instead of CosmoMC theta to CAMB, if both are 
-        present in the parameter file.
-    **cosmo_params : dict of float
-        An optional dictionary of parameter names and values to override 
-        the values loaded from the YAML file. 
+    Other Parameters
+    ----------------
+    param_file : str or None, default=None
+        Path to a YAML file that contains the parameter names and values.
+        Available for backwards compatibility; use `params` instead.
 
     Notes
     -----
-    If both 'H0' and 'theta' are provided, only 'theta' is used, unless `use_H0` 
-    is `True`. If both 'logA' and 'As' are provided, only 'As' is used. 
+    The returned dictionary does not contain a key `lmax`/`l_max_scalars`
+    for the maximum multipole for the calculation; this is added in the
+    function `set_camb_params` or `set_class_params`.
     """
-    input_params = set_cosmo_params(param_file=param_file, use_H0=use_H0, **cosmo_params).copy()
+    params_dict = get_param_dict(param_dict_or_file=params, 
+                                 use_class=use_class,
+                                 param_file=param_file)
+    p = {**params_dict, **cosmo_params}
+    p = utils.remove_param_aliases(p, use_class=use_class)
+    # if both H0 and theta are specified, can only provide one
+    if use_H0:
+        p.pop('cosmomc_theta', None)
+        p.pop('theta_s_100', None)
+    else:
+        p.pop('H0', None)
+        p.pop('h', None)
+    return p
+
+
+def set_camb_params(lmax, params=None, use_H0=False, param_file=None,
+                    **cosmo_params):
+    """Returns a `CAMBparams` instance with the requested cosmological
+    and accuracy parameters.
+
+    Parameters
+    ----------
+    lmax : int
+        The maximum multipole for the theory calculation.
+    params : str or dict or None, default=None
+        Either a dictionary of parameter names and values, or the path to
+        a YAML file containing the parameter names and values. If not
+        provided (and a `param_file` is also not provided), the default
+        set of fiducial parameters is used.
+    use_H0 : bool, default=False
+        Pass the Hubble constant instead of `cosmomc_theta` to CAMB, if
+        both are provided.
+    **cosmo_params : dict of float
+        An optional dictionary of parameter names and values to override
+        the values passed, or add additional parameters.
+
+    Returns
+    -------
+    pars : camb.model.CAMBparams
+        A `CAMBparams` instance.
+
+    Other Parameters
+    ----------------
+    param_file : str or None, default=None
+        Path to a YAML file that contains the parameter names and values.
+        Available for backwards compatibility; use `params` instead.
+    """
+    input_params = set_cosmo_params(params=params, use_H0=use_H0,
+                                    param_file=param_file, **cosmo_params)
     input_params['lmax'] = int(lmax+500)
     pars = camb.set_params(**input_params)
-    return pars.copy()
+    return pars
+
+
+#TODO:
+def set_class_params(lmax, params=None, use_H0=False, **cosmo_params):
+    raise NotImplementedError
 
 
 
 
 # ----- CMB and BAO theory -----
 
-def get_bao_rs_dv(camb_params, z, camb_results=None):
+def get_camb_bao_rs_dv(camb_params, z, camb_results=None):
     """Returns the theoretical BAO quantity r_s/d_V(z) at the given 
     redshifts calculated by CAMB.
 
     Parameters
     ----------
     camb_params : camb.model.CAMBparams
-        The `camb.model.CAMBparams` instance to be used in the calculation.
+        The `camb.model.CAMBparams` instance to be used in the
+        calculation.
     z : array_like of float
         An array of redshifts at which to calculate r_s/d_V(z).
     camb_results : camb.results.CAMBdata, default=None
-        A `camb.results.CAMBdata` instance that has already been initialized.
-        If `None`, it will be initialized within this function.
+        A `camb.results.CAMBdata` instance that has already been
+        initialized. If `None`, `camb.get_background(camb_params)` will
+        be called.
     
     Returns
     -------
     rs_dv : array_like of float
         The values of r_s/d_V(z) for each redshift in `z`.
     """
+    if camb_results is None:
+        camb_results = camb.get_background(camb_params)
     rs_dv = camb_results.get_BAO(z, camb_params)[:,0]
     return rs_dv
 
 
-def get_spectra(camb_params, lmax, camb_results=None, raw_cl=True, 
-        CMB_unit='muK', cmb_types=['lensed', 'unlensed']):
-    """Returns the theoretical lensed and/or unlensed CMB TT, EE, BB, and TE 
-    power spectra and the lensing convergence power spectrum computed by CAMB.
+def get_class_bao_rs_dv(class_results, z):
+    """Returns the theoretical BAO quantity r_s/d_V(z) at the given
+    redshifts calculated by CLASS.
+
+    r_s is the comoving sound horizon at baryon drag (r_drag); d_V is the
+    volume-averaged distance d_V(z) = [D_M(z)^2 * c*z/H(z)]^(1/3), with
+    D_M = (1+z) * D_A, and D_A is the comoving angular-diameter distance.
 
     Parameters
     ----------
-    camb_params : camb.model.CAMBparams
-        The `camb.model.CAMBparams` instance to be used in the calculation.
+    class_results : classy.Class
+        A `Class` instance on which `.compute()` has already been called.
+    z : array_like of float
+        Redshift(s), all > 0, at which to evaluate r_s/d_V(z).
+
+    Returns
+    -------
+    rs_dv : array_like of float
+        The values of r_s/d_V(z) for each redshift in `z`.
+    """
+    z = np.atleast_1d(np.asarray(z, dtype=float))
+    rs = class_results.rs_drag() # Mpc
+    d_a = class_results.angular_distance(z) # Mpc (physical D_A)
+    hubble = class_results.Hubble(z) # 1/Mpc, i.e. H(z)/c
+    d_m = (1.0 + z) * d_a # Mpc (comoving angular-diameter distance)
+    d_v = (d_m**2 * z / hubble)**(1.0 / 3.0) # Mpc
+    rs_dv = rs / d_v
+    return rs_dv
+
+
+def get_bao_rs_dv(camb_params, z, camb_results=None):
+    """Returns the theoretical BAO quantity r_s/d_V(z) at the given
+    redshifts calculated by CAMB.
+
+    See Also
+    --------
+    get_camb_bao_rs_dv
+
+    Notes
+    -----
+    This function is defined here for backwards compatibility.
+    """
+    return get_camb_bao_rs_dv(camb_params, z, camb_results=camb_results)
+
+
+
+def get_spectra(params, lmax, results=None, use_class=False, raw_cl=True,
+                cmb_types=['lensed', 'unlensed'], **kwargs):
+    """Returns the theoretical lensed and/or unlensed CMB TT, EE, BB, and
+    TE power spectra and the lensing convergence power spectrum.
+
+    Parameters
+    ----------
+    params : camb.model.CAMBparams or dict
+        An instance of `camb.model.CAMBparams` if `use_class=False`, or
+        a dictionary of CLASS parameter names and values that can be
+        passed to the `classy.Class.set` method.
     lmax : int
-        The maximum multipole of the spectra to be returned. This cannot be
-        higher than the value used in the CAMBparams instance, which is 
-        `camb.model.CAMBparams.max_l`.
-    camb_results : camb.results.CAMBdata, default=None
-        A `camb.results.CAMBdata` instance that has already been initialized.
-        If `None`, it will be initialized within this function.
+        The maximum multipole of the spectra to be returned. This cannot
+        be higher than the value used in the calculation.
+    results : camb.results.CAMBdata or classy.Class or None, default=None
+        An instance of `camb.results.CAMBdata` if `use_class=False`, or
+        an instance of `classy.Class` on which `.compute()` has already
+        been called. If `None`, the `params` will be used to calculate
+        the `results`.
+    use_class : bool, default=False
+        Whether to use CLASS instead of CAMB.
     raw_cl : bool, default=True
-        If `True`, returns only C_ell, instead of ell * (ell + 1) * C_ell / 2pi,
-        for the CMB power spectra.
-    CMB_unit : str, default='muK'
-        The units of the CMB power spectra. Must be a valid `CMB_unit` that 
-        may be passed to `camb.results.CAMBdata.get_cmb_power_spectra`.
+        If `True`, returns only C_ell instead of multiplying by
+        ell * (ell + 1) / 2pi for the CMB power spectra.
     cmb_types : list of str, default=['lensed', 'unlensed']
         The kinds of spectra to return.
 
     Returns
     -------
-    theo : nested dict of array_like of float
-        A nested dictionary with the `cmb_types` as keys. Each holds another
-        dictionary with keys `'tt'`, `'te'`, `'ee'`, and `'bb'` holding the
-        CMB power spectra, a key 'kk' holding the lensing power spectrum as 
-        C_L^kk = [L(L+1)]^2 C_L^phiphi / 4, and a key `'ells'` holding the 
-        multipoles starting from zero.
+    theo : dict of dict of array_like of float
+        A nested dictionary with the `cmb_types` as keys. Each holds
+        another dictionary with keys `'tt'`, `'te'`, `'ee'`, and `'bb'`
+        holding the CMB power spectra, a key 'kk' holding the lensing
+        convergence power spectrum C_L^kk = [L(L+1)]^2 C_L^phiphi / 4,
+        and a key `'ells'` holding the multipoles, starting from zero.
+
+    Other Parameters
+    ----------------
+    **kwargs : dict, optional
+        Other keyword arguments, allowed for backwards compatibility.
+        - If `camb_results` is passed, `use_class=False`, and
+          `results=None`, the `camb_results` will be used; ignored if
+          `results` is passed.
+        Any other keyword arguments will be ignored.
+
+    See Also
+    --------
+    get_delensed_spectra : Delensed CMB power spectra (CAMB only).
+    """
+    # backwards compatibility:
+    if (results is None) and (not use_class):
+        results = kwargs.pop('camb_results', None)
+    if len(kwargs) > 0:
+        kwargs_list = ', '.join([f'{k}={v}' for (k, v) in kwargs.items()])
+        warnings.warn(f"The following keyword arguments will be ignored: {kwargs_list}")
+    # calculate the power spectra:
+    if use_class:
+        theo = get_class_spectra(params, lmax, class_results=results,
+                                 raw_cl=raw_cl, cmb_types=cmb_types)
+    else:
+        theo = get_camb_spectra(params, lmax, camb_results=results,
+                                 raw_cl=raw_cl, cmb_types=cmb_types)
+    return theo
+
+
+def get_camb_spectra(camb_params, lmax, camb_results=None, raw_cl=True,
+                     CMB_unit='muK', cmb_types=['lensed', 'unlensed']):
+    """Returns the theoretical lensed and/or unlensed CMB TT, EE, BB, and
+    TE power spectra and the lensing convergence power spectrum computed
+    by CAMB.
+
+    Parameters
+    ----------
+    camb_params : camb.model.CAMBparams
+        The `camb.model.CAMBparams` instance to be used in the
+        calculation.
+    lmax : int
+        The maximum multipole of the spectra to be returned. This cannot
+        be higher than the value used in the CAMBparams instance, which
+        is `camb.model.CAMBparams.max_l`.
+    camb_results : camb.results.CAMBdata or None, default=None
+        A `camb.results.CAMBdata` instance. If `None`,
+        `camb.get_results(camb_params)` will be called.
+    raw_cl : bool, default=True
+        If `True`, returns only C_ell, instead of CAMB's default
+        ell * (ell + 1) * C_ell / 2pi, for the CMB power spectra.
+    CMB_unit : str, default='muK'
+        The units of the CMB power spectra. Must be a valid `CMB_unit`
+        accepted by `camb.results.CAMBdata.get_cmb_power_spectra`.
+    cmb_types : list of str, default=['lensed', 'unlensed']
+        The kinds of spectra to return.
+
+    Returns
+    -------
+    theo : dict of dict of array_like of float
+        A nested dictionary with the `cmb_types` as keys. Each holds
+        another dictionary with keys `'tt'`, `'te'`, `'ee'`, and `'bb'`
+        holding the CMB power spectra, a key 'kk' holding the lensing
+        convergence power spectrum C_L^kk = [L(L+1)]^2 C_L^phiphi / 4,
+        and a key `'ells'` holding the multipoles, starting from zero.
+
+    See Also
+    --------
+    get_delensed_spectra : Delensed CMB power spectra.
     """
     if camb_results is None:
         camb_results = camb.get_results(camb_params)
@@ -259,7 +380,8 @@ def get_spectra(camb_params, lmax, camb_results=None, raw_cl=True,
     camb_spectra = ['tt', 'ee', 'bb', 'te']
     theo = {}
     ells = np.arange(lmax + 1)
-    powers = camb_results.get_cmb_power_spectra(camb_params, CMB_unit=CMB_unit, raw_cl=raw_cl, lmax=lmax)
+    powers = camb_results.get_cmb_power_spectra(camb_params, CMB_unit=CMB_unit,
+                                                raw_cl=raw_cl, lmax=lmax)
     clkk = camb_results.get_lens_potential_cls(lmax=lmax)[:,0] * 2 * np.pi / 4
     for cmb_type in cmb_types:
         theo[cmb_type] = {'ells': ells.copy(), 'kk': clkk.copy()}
@@ -267,7 +389,45 @@ def get_spectra(camb_params, lmax, camb_results=None, raw_cl=True,
             theo[cmb_type][s] = powers[theo_keys[cmb_type]][:,i].copy()
             theo[cmb_type][s][:2] = 0
     return theo
-    
+
+
+def get_class_spectra(params, lmax, class_results=None, raw_cl=True,
+                      cmb_types=['lensed', 'unlensed']):
+    """Returns the theoretical lensed and/or unlensed CMB TT, EE, BB, and
+    TE power spectra and the lensing convergence power spectrum computed
+    by CLASS.
+
+    Parameters
+    ----------
+    params : dict
+        A dictionary of CLASS parameter names and values that can be
+        passed to the `classy.Class.set` method.
+    lmax : int
+        The maximum multipole of the spectra to be returned. This cannot
+        be higher than the value used in the CAMBparams instance, which
+        is `camb.model.CAMBparams.max_l`.
+    results : classy.Class or None, default=None
+        An instance of `classy.Class` on which `.compute()` has already
+        been called. If `None`, the `params` will be used to calculate
+        the `results`.
+    raw_cl : bool, default=True
+        If `True`, returns only C_ell instead of multiplying by
+        ell * (ell + 1) / 2pi for the CMB power spectra.
+    cmb_types : list of str, default=['lensed', 'unlensed']
+        The kinds of spectra to return.
+
+    Returns
+    -------
+    theo : dict of dict of array_like of float
+        A nested dictionary with the `cmb_types` as keys. Each holds
+        another dictionary with keys `'tt'`, `'te'`, `'ee'`, and `'bb'`
+        holding the CMB power spectra (in units of uK^2 without any
+        multiplicative factors applied), a key 'kk' holding the lensing
+        convergence power spectrum C_L^kk = [L(L+1)]^2 C_L^phiphi / 4,
+        and a key `'ells'` holding the multipoles, starting from zero.
+    """
+    raise NotImplementedError
+
 
 def get_delensed_spectra(camb_params, lmax, lensing_noise, Lmin, Lmax=None, 
         camb_results=None, raw_cl=True, CMB_unit='muK'):
@@ -380,68 +540,88 @@ class Theory:
     """Calculate the theoretical CMB + lensing potential power spectra and 
     the theoretical BAO r_s / d_V values.
     """
-    cmb_types = ['lensed', 'unlensed', 'delensed'] 
     cmb_spectra = ['tt', 'ee', 'bb', 'te'] # order output by CAMB
 
-    def __init__(self, lmax, output_dir, output_root=None, param_file=None, nlkk=None, recon_lmin=None, recon_lmax=None, use_H0=False,
-            use_class=False, #TODO
-            **cosmo_params):
-        """Initialization of the theory calculation for a specific set of 
+    def __init__(self, lmax, output_dir, output_root=None, params=None,
+                 nlkk=None, recon_lmin=None, recon_lmax=None, use_H0=False,
+                 use_class=False, param_file=None, **cosmo_params):
+        """Initialization of the theory calculation for a specific set of
         cosmological, accuracy, and experimental parameters.
-        
+
         Parameters
         ----------
         lmax : int
             The  maximum multipole to be used for the theory spectra.
         output_dir: str
-            The full path to the directory where the input CAMB parameters, 
-            output theory CMB and lensing power spectra, and the BAO theory 
-            are saved.
+            The full path to the directory where the input parameters,
+            output theory CMB and lensing power spectra, and the BAO
+            theory are saved.
         output_root : str, default=None
             If not `None`, all files saved in the `output_dir` will begin
             with the `output_root`.
-        param_file : str, default=None
-            The file name, including the absolute path, of a YAML file that
-            contains the cosmological parameter names and values that can be 
-            passed to the CAMB function `camb.set_params()`.. If not provided, 
-            the default/fiducial values are used (including accuracy settings).
+        params : dict or str or None, default=None
+            A dictionary of CAMB or CLASS parameter names and values, or
+            the path to a YAML file with the parameter names and values.
+            If `None` (and `param_file=None)`, the default set of fiducial
+            parameters will be used.
         nlkk : array_like of float, default=None
-            The lensing reconstruction noise, used to calculate the delensed
-            spectra. This should be the noise on the lensing convergence 
-            power spectrum, i.e. N_L^kappakappa = [L(L+1)]^2 N_L^phiphi / 4,
-            starting from L = 0.
+            The lensing reconstruction noise, used to calculate the
+            delensed spectra if `use_class=False`. This should be the
+            noise on the lensing convergence power spectrum, i.e.
+            N_L^kappakappa = [L(L+1)]^2 N_L^phiphi / 4, starting from L=0.
         recon_lmin, recon_lmax : int, default=None
-            The minimum and maximum multipoles to use for delensing, 
-            corresponding to those used in the lensing reconstruction. 
-            If `nlkk` is not None, `recon_lmin` must be passed. If 
-            `recon_lmax` is `None`, `lmax` will be used.
+            The minimum and maximum multipoles to use for delensing (if
+            `use_class=False`), corresponding to those used in the
+            lensing reconstruction. If `nlkk` is not None, `recon_lmin`
+            must be passed. If `recon_lmax` is `None`, `lmax` will be
+            used.
         use_H0 : bool, default=False
-            Pass the Hubble constant instead of CosmoMC theta to CAMB, if both are 
-            present in the parameter file.
+            Used when `params` contains both the Hubble constant `'H0'`
+            and the angular scale of the sound horizon at last scattering,
+            either `cosmomc_theta` (or `theta`, which is defined in
+            `hdfisher` as `100 * cosmomc_theta`) in CAMB or `theta_s_100`
+            in CLASS. If `use_H0=True`, the Hubble constant will be used;
+            otherwise, `cosmomc_theta` or `theta_s_100` is used.
         **cosmo_params : dict of float, optional
-            An optional dictionary of parameter names and values to override 
-            the values loaded from the YAML file. Note that this won't add any 
-            new parameters; it will only update existing parameters loaded 
-            from the YAML file.
+            An optional dictionary of parameter names and values to
+            override the values in `params` (or the `param_file`).
+
+        Other Parameters
+        ----------------
+        param_file : str or None, default=None
+            Path to a YAML file containing the parameter names and values.
+            Allowed for backwards compatibility; use `params` instead.
+            Only used if `params=None`.
 
         Notes
         -----
         For the CMB lensing power spectrum, we use the convention
         C_L^kappakappa = C_L^phiphi * [L * (L + 1)]^2 / 4,
-        rather than the CAMB convention, 
+        rather than the CAMB convention,
         [C_L^kappakappa]_CAMB = (2 pi / 4) * C_L^kappakappa.
 
-        All power spectrum arrays begin at a multipole ell = 0. The CMB power 
+        All power spectrum arrays begin at a multipole ell = 0. The CMB power
         spectra are in C_ell's (i.e., no factor of ell * (ell + 1) / (2 * pi)
         applied), in units of uK^2.
-        """
-        self.lmax = int(lmax)
-        self.ells = np.arange(self.lmax+1) # CAMB starts at lmin = 0
-        # filenames to save/load theory
-        self.output_dir = output_dir
-        self.theo_fnames = config.camb_theo_fnames(output_dir, theo_root=output_root)
 
-        # set up empty dict to hold theory 
+        CLASS does not calculate delensed power spectra.
+        """
+        # TODO: add another note about CLASS modifications, and raise warning here
+
+        self.lmax = int(lmax)
+        self.ells = np.arange(self.lmax+1) 
+        
+        self.use_class = use_class
+        if self.use_class:
+            self.cmb_types = ['lensed', 'unlensed']
+        else:
+            self.cmb_types = ['lensed', 'unlensed', 'delensed'] 
+
+        # filenames to save/load theory:
+        self.output_dir = output_dir
+        self.theo_fnames = config.theo_fnames(output_dir, theo_root=output_root, use_class=use_class)
+
+        # set up empty dict to hold theory:
         self.theo = {cmb_type: {} for cmb_type in self.cmb_types}
         # will also save the lensing potential theory and noise to use for delensing
         self.clkk = None
@@ -455,26 +635,53 @@ class Theory:
         else:
             self.Lmax = self.lmax
 
-        # set up the camb params 
-        self.camb_params = set_camb_params(self.lmax, param_file=param_file, use_H0=use_H0, **cosmo_params)
-        self.results = None # only calculate the `CAMBdata` if necessary
+        # initialize CAMB or CLASS with the given parameters:
+        params = params if (params is not None) else param_file # backwards compatibility
+        self.camb_params = None
+        self.class_params = None
+        self._setup_boltzmann_params(params=params, use_H0=use_H0, **cosmo_params)
+        self.results = None # only calculate if necessary
+
+
+    def _setup_boltzmann_params(self, params=None, use_H0=False, **cosmo_params):
+        """Initialize CAMB or CLASS with the given parameters."""
+        if self.use_class:
+            self.class_params = set_class_params(self.lmax, params=params, use_H0=use_H0, **cosmo_params)
+        else:
+            self.camb_params = set_camb_params(self.lmax, params=params, use_H0=use_H0, **cosmo_params)
+
+
+    def get_results(self, save=False):
+        """Get the `camb.results.CAMBdata` or `classy.Class` instance
+        used to calculate the theory.
+
+        See Also
+        --------
+        get_camb_results, get_class_results
+        """
+        if self.use_class:
+            self.get_class_results(save=save)
+        else:
+            self.get_camb_results(save=save)
+        return self.results
 
 
     def get_camb_results(self, save=False):
         """Get the `CAMBdata` instance from the `CAMBparams` (stored in
-        `Theory.camb_params`), and store it in `Theory.results`.
-        
+        the `camb_params` attribute), and store it in the `results`
+        attribute.
+
         Parameters
         ----------
         save : bool, default=False
-            If `True`, save the values set in the `CAMBparams` instance used 
-            to calculate the theory. The file will be saved in the `output_dir`
-            passed when initializing the `Theory` class.
+            If `True`, save the values set in the `CAMBparams` instance
+            used to calculate the theory. The file will be saved in the
+            `output_dir` passed when initializing the `Theory` class.
 
         Returns
         -------
-        Theory.results : camb.results.CAMBdata
-            The `CAMBdata` instance calculated from the input `CAMBparams`.
+        camb.results.CAMBdata
+            A `CAMBdata` instance calculated from the input `CAMBparams`
         """
         if self.results is None:
             self.results = camb.get_results(self.camb_params)
@@ -483,6 +690,34 @@ class Theory:
         if save:
             with open(self.theo_fnames['params'], 'w') as f:
                 f.write(str(self.camb_params))
+        return self.results
+
+
+    def get_class_results(self, save=False):
+        """Compute the CLASS results from the parameter dictionary stored
+        in the `class_params` attribute, and store it in the `results`
+        attribute.
+
+        Parameters
+        ----------
+        save : bool, default=False
+            If `True`, save the parameters that were passed to CLASS. The
+            file is written to the `output_dir` given when initializing
+            the `Theory` class.
+
+        Returns
+        -------
+        classy.Class
+            The `Class` instance, after `.compute()` has been called on it.
+        """
+        if self.results is None:
+            M = Class()
+            M.empty()
+            M.set(self.class_params)
+            M.compute()
+            self.results = M
+        if save:
+            utils.save_yaml(self.theo_fnames['params'], self.class_params)
         return self.results
 
 
@@ -518,8 +753,11 @@ class Theory:
                 rs_dv = rs_dv_vals[idxs]
         if rs_dv is None: # still need to calculate it
             if self.results is None:
-                self.get_camb_results(save=save)
-            rs_dv = self.results.get_BAO(zs, self.camb_params)[:,0]
+                self.get_results(save=save)
+            if self.use_class:
+                rs_dv = get_class_rs_dv(self.results, zs)
+            else:
+                rs_dv = get_camb_bao_rs_dv(self.camb_params, zs, camb_results=self.results)
             if save:
                 header = 'z, r_s/d_V(z)'
                 np.savetxt(fname, np.column_stack([zs, rs_dv]), header=header)
@@ -549,7 +787,7 @@ class Theory:
             units of uK^2, starting at ell = 0.
         """
         theo = {}
-        for cmb_type in self.cmb_types[:2]: # loop through lensed, unlensed
+        for cmb_type in ['lensed', 'unlensed']:
             fname = self.theo_fnames[cmb_type]
             # if not overwriting, check if we already have all the spectra, or if its saved
             if all([s in self.theo[cmb_type] for s in self.cmb_spectra + ['kk']]) and (not overwrite):
@@ -559,8 +797,12 @@ class Theory:
                 theo[cmb_type] = utils.load_from_file(fname, config.theo_cols)
             else: # get it from camb
                 if self.results is None:
-                    self.get_camb_results(save=save)
-                theo[cmb_type] = get_spectra(self.camb_params, self.lmax, camb_results=self.results, raw_cl=True, CMB_unit='muK', cmb_types=[cmb_type])[cmb_type] 
+                    self.get_results(save=save)
+                params = self.class_params if self.use_class else self.camb_params
+                spectra_dict = get_spectra(params, self.lmax, results=self.results, 
+                                           use_class=self.use_class, raw_cl=True, 
+                                           cmb_types=[cmb_type])
+                theo[cmb_type] = spectra_dict[cmb_type] 
             # save it
             if save:
                 print(f"saving {cmb_type} theory to {fname}") 
@@ -579,6 +821,8 @@ class Theory:
             If `nlkk` and/or `recon_lmin` was not passed when initializing 
             the `Theory` class.
         """
+        if self.use_class:
+            raise ValueError("`use_class=True`: Cannot calculate delensed spectra with CLASS.")
         info = 'you must pass the lensing reconstruction noise as `nlkk` along with the minimum multipole to use as `recon_lmin` when initializing the `Theory` class in order to calculate the delensed spectra.'
         missing_args = []
         if self.nlkk is None:
