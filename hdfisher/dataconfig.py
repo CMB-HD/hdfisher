@@ -240,32 +240,32 @@ class Data:
     # ----- functions that resturn file names of data: -----
 
     # TODO : remove this?
-    def fiducial_param_file(self, feedback=False):
-        """Absolute path to the YAML file holding the fiduical parameters
-        (including cosmological and accuracy parameters) passed to CAMB
-        when calculating the CMB and BAO theory.
+    #def fiducial_param_file(self, feedback=False):
+    #    """Absolute path to the YAML file holding the fiduical parameters
+    #    (including cosmological and accuracy parameters) passed to CAMB
+    #    when calculating the CMB and BAO theory.
 
-        Parameters
-        ----------
-        feedback : bool, default=False
-            If `True`, the parameter file sets the CAMB `halofit_version`
-            to `mead2020_feedback`, i.e. uses the HMCode 2020 + baryonic
-            feedback non-linear model. Otherwise, the HMCode 2016
-            CDM-only model is used by setting `halofit_version` to
-            `mead2016`.
+    #    Parameters
+    #    ----------
+    #    feedback : bool, default=False
+    #        If `True`, the parameter file sets the CAMB `halofit_version`
+    #        to `mead2020_feedback`, i.e. uses the HMCode 2020 + baryonic
+    #        feedback non-linear model. Otherwise, the HMCode 2016
+    #        CDM-only model is used by setting `halofit_version` to
+    #        `mead2016`.
 
-        Returns
-        -------
-        fname : str
-            The absolute path to the file.
+    #    Returns
+    #    -------
+    #    fname : str
+    #        The absolute path to the file.
 
-        See Also
-        --------
-        config.fiducial_param_file
-        """
-        fname = config.fiducial_param_file(feedback=feedback,
-                                           hd_data_version=self.hd_data_version)
-        return fname
+    #    See Also
+    #    --------
+    #    config.fiducial_param_file
+    #    """
+    #    fname = config.fiducial_param_file(feedback=feedback,
+    #                                       hd_data_version=self.hd_data_version)
+    #    return fname
 
 
     def fiducial_fisher_steps_file(self, use_class=False):
@@ -1945,4 +1945,14 @@ class Data:
         else:
             params = fid_params.copy()
         return params
+
+
+    def fiducial_fisher_step_sizes(self, use_class=False):
+        """Dictionary of fiducial step sizes used to vary the parameters.
+
+        See Also
+        --------
+        config.fiducial_fisher_step_sizes
+        """
+        return config.fiducial_fisher_step_sizes(use_class=use_class)
 

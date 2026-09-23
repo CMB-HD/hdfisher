@@ -181,16 +181,83 @@ def set_camb_params(lmax, params=None, use_H0=False, param_file=None,
     """
     input_params = set_cosmo_params(params=params, use_H0=use_H0,
                                     param_file=param_file, **cosmo_params)
-    input_params['lmax'] = int(lmax+500)
+    input_params['lmax'] = int(lmax + 500)
     pars = camb.set_params(**input_params)
     return pars
 
 
-#TODO:
 def set_class_params(lmax, params=None, use_H0=False, **cosmo_params):
-    raise NotImplementedError
+    """Returns a dictionary of cosmological, accuracy, and any additional
+    parameters parameters that CLASS accepts.
+
+    Parameters
+    ----------
+    lmax : int
+        The maximum multipole for the theory calculation.
+    params : str or dict or None, default=None
+        Either a dictionary of parameter names and values, or the path to
+        a YAML file containing the parameter names and values. If not
+        provided (and a `param_file` is also not provided), the default
+        set of fiducial parameters is used.
+    use_H0 : bool, default=False
+        Pass the Hubble constant instead of `theta_s_100` to CLASS, if
+        both are provided.
+    **cosmo_params : dict of float
+        An optional dictionary of parameter names and values to override
+        the values passed, or add additional parameters.
+
+    Returns
+    -------
+    class_params : dict
+        A dictionary of CLASS parameter names and values which can be
+        passed to the `classy.Class.set` method.
+    """
+    class_params = set_cosmo_params(params=params, use_H0=use_H0,
+                                    use_class=True, **cosmo_params)
+    class_params['l_max_scalars'] = int(lmax + 500)
+    # warn the user if these parameters are likely to cause an error
+    # if CLASS has not been modified:
+    _warn_about_class_lmax(class_params)
+    _warn_about_class_Neff(class_params)
+    return class_params
 
 
+def _warn_about_class_lmax(class_params, max_lmax=14000):
+    lmax = class_params.get('l_max_scalars', 0)
+    accurate_lensing = class_params.get('accurate_lensing', 0)
+    if (lmax >= max_lmax) and (accurate_lensing > 0) and (mpi.rank == 0):
+        msg = (f"`l_max_scalars = {lmax}`: the CLASS source code must be "
+               "modified before using a value of `l_max_scalars` higher than "
+               f"approximately {max_lmax} with `accurate_lensing=1`. If you "
+               "have already modified CLASS to allow such a calculation, you "
+               "may ignore this message. Otherwise, you must follow the "
+               "instructions provided in the README file of `hdfisher` and "
+               "given in Appendix A of Cheslog et. al. (2026).")
+        warnings.warn(msg)
+
+
+def _warn_about_class_Neff(class_params, min_Neff=3.0396):
+    N_ur = class_params.get('N_ur')
+    N_eff = class_params.get('Neff')
+    param_name = None
+    param_val = None
+    min_val = None
+    if (N_ur is not None) and (N_ur < 0):
+        param_name = 'N_ur'
+        param_val = f'{N_ur = }'
+        min_val = 0
+    elif (Neff is not None) and (Neff < min_Neff):
+        param_name = 'Neff'
+        param_val = f'{Neff = }'
+        min_val = f'approximately {min_Neff}'
+    if param_name is not None:
+        msg = (f"{param_val}: the CLASS source code must be modified before "
+               f"using a value of {param_name} below {min_val}. If you have "
+               "already modified CLASS to allow such a calculation, you may "
+               "ignore this message. Otherwise, you must follow the "
+               "instructions provided in the README file of `hdfisher` and "
+               "given in Appendix A of Cheslog et. al. (2026).")
+        warnings.warn(msg)
 
 
 # ----- CMB and BAO theory -----
@@ -391,25 +458,24 @@ def get_camb_spectra(camb_params, lmax, camb_results=None, raw_cl=True,
     return theo
 
 
-def get_class_spectra(params, lmax, class_results=None, raw_cl=True,
-                      cmb_types=['lensed', 'unlensed']):
+def get_class_spectra(class_params, lmax, class_results=None, raw_cl=True,
+                      cmb_types=['lensed', 'unlensed'], TCMB=2.7255e6):
     """Returns the theoretical lensed and/or unlensed CMB TT, EE, BB, and
     TE power spectra and the lensing convergence power spectrum computed
     by CLASS.
 
     Parameters
     ----------
-    params : dict
+    class_params : dict
         A dictionary of CLASS parameter names and values that can be
         passed to the `classy.Class.set` method.
     lmax : int
         The maximum multipole of the spectra to be returned. This cannot
-        be higher than the value used in the CAMBparams instance, which
-        is `camb.model.CAMBparams.max_l`.
-    results : classy.Class or None, default=None
+        be higher than the value of `l_max_scalars` passed to CLASS.
+    class_results : classy.Class or None, default=None
         An instance of `classy.Class` on which `.compute()` has already
-        been called. If `None`, the `params` will be used to calculate
-        the `results`.
+        been called. If `None`, the `class_params` will be used to
+        calculate the `class_results`.
     raw_cl : bool, default=True
         If `True`, returns only C_ell instead of multiplying by
         ell * (ell + 1) / 2pi for the CMB power spectra.
@@ -425,8 +491,43 @@ def get_class_spectra(params, lmax, class_results=None, raw_cl=True,
         multiplicative factors applied), a key 'kk' holding the lensing
         convergence power spectrum C_L^kk = [L(L+1)]^2 C_L^phiphi / 4,
         and a key `'ells'` holding the multipoles, starting from zero.
+
+    Other Parameters
+    ----------------
+    TCMB : float, default=2.7255e6
+        A default value for the CMB temperature (in uK), which is used to
+        return the CMB power spectra in units of uK^2. Only used if
+        `'T_cmb'` is not in `class_params`. (Note that CLASS expects
+        `'T_cmb'` in units of K, but `default_TCMB` has units of uK)
     """
-    raise NotImplementedError
+    # calculate results:
+    if class_results is None:
+        from classy import Class
+        class_results = Class()
+        class_results.empty()
+        class_results.set(class_params)
+        class_results.compute()
+
+    # calculate spectra:
+    ells = np.arange(lmax + 1)
+    unlensed_cls = class_results.raw_cl(lmax)
+    if 'unlensed' in cmb_types:
+        class_cls['unlensed'] = unlensed_cls
+    if 'lensed' in cmb_types:
+        class_cls['lensed'] = class_results.lensed_cl(lmax)
+    clpp = unlensed_cls['pp']
+    clkk = ells**2 * (ells + 1)**2 * clpp / 4
+
+    theo = {}
+    lfact = 1 if raw_cl else ells * (ells + 1) / (2 * np.pi)
+    if 'T_cmb' in class_params:
+        TCMB = class_params['T_cmb'] * 1e6
+    for cmb_type in cmb_types:
+        theo[cmb_type] = {'ells': ells.copy(), 'kk': clkk.copy()}
+        for s in ['tt', 'ee', 'bb', 'te']:
+            theo[cmb_type][s] = class_cls[cmb_type][s].copy() * lfact * TCMB**2
+            theo[cmb_type][s][:2] = 0
+    return theo
 
 
 def get_delensed_spectra(camb_params, lmax, lensing_noise, Lmin, Lmax=None, 
@@ -606,7 +707,7 @@ class Theory:
 
         CLASS does not calculate delensed power spectra.
         """
-        # TODO: add another note about CLASS modifications, and raise warning here
+        # TODO: add another note to docstring about CLASS modifications
 
         self.lmax = int(lmax)
         self.ells = np.arange(self.lmax+1) 
@@ -711,6 +812,7 @@ class Theory:
             The `Class` instance, after `.compute()` has been called on it.
         """
         if self.results is None:
+            from classy import Class
             M = Class()
             M.empty()
             M.set(self.class_params)

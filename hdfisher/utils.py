@@ -336,9 +336,8 @@ def add_param_aliases(params_dict, replace=True, use_class=False):
     add_camb_param_aliases, add_class_param_aliases 
     remove_param_aliases
     """
-    # TODO
     if use_class:
-        raise NotImplementedError
+        params_dict = add_class_param_aliases(params_dict, replace=replace)
     else:
         params_dict = add_camb_param_aliases(params_dict, replace=replace)
     return params_dict
@@ -368,9 +367,8 @@ def remove_param_aliases(params_dict, use_class=False):
     remove_camb_param_aliases, remove_class_param_aliases 
     add_param_aliases
     """
-    # TODO
     if use_class:
-        raise NotImplementedError
+        params_dict = remove_class_param_aliases(params_dict)
     else:
         params_dict = remove_camb_param_aliases(params_dict)
     return params_dict
@@ -416,14 +414,49 @@ def remove_camb_param_aliases(params_dict):
     return params_dict
 
 
+# TODO: docstring
 def add_class_param_aliases(params_dict, replace=True):
-    # TODO: will add `sum_m_ncdm` given `m_ncdm`
-    raise NotImplementedError
+    m_ncdm = params_dict.get('m_ncdm', None)
+    if m_ncdm is not None:
+        # add a key for the sum of the neutrino masses,
+        # and for the number of massive neutrinos:
+        if isinstance(m_ncdm, str):
+            masses = [float(m) for m in m_ncdm.split(',')]
+            params_dict['num_massive_nu'] = len(masses)
+            params_dict['num_nu_masses'] = len(masses)
+            params_dict['sum_m_ncdm'] = sum(masses)
+        elif m_ncdm > 0:
+            # if a single mass is provided, multiply it by `num_massive_nu`
+            # (determined by the `deg_ncdm` parameter),
+            # and store both `num_massive_nu` and `num_nu_masses=1` to
+            # reconstruct `m_ncdm` later:
+            deg_ncdm = params_dict.get('deg_ncdm', 1)
+            # deg_ncdm could be a single number, or multiple values (as a `str`):
+            if isinstance(deg_ncdm, str):
+                params_dict['num_massive_nu'] = sum([float(d) for d in deg_ncdm.split(',')])
+            else:
+                params_dict['num_massive_nu'] = deg_ncdm
+            params_dict['num_nu_masses'] = 1
+            params_dict['sum_m_ncdm'] = m_ncdm * params_dict['num_massive_nu']
+        if ('sum_m_ncdm' in params_dict) and replace:
+            params_dict.pop('m_ncdm')
+    return params_dict
 
 
+# TODO: docstring
 def remove_class_param_aliases(params_dict):
-    # TODO: will replace `sum_m_ncdm` with `m_ncdm`
-    raise NotImplementedError
+    num_massive_nu = params_dict.pop('num_massive_nu', 1)
+    num_nu_masses = params_dict.pop('num_nu_masses', 1)
+    sum_m_ncdm = params_dict.pop('sum_m_ncdm', None)
+    if sum_m_ncdm is not None:
+        # divide total mass equally:
+        m_nu = sum_m_ncdm / num_massive_nu
+        if num_nu_masses > 1:
+            masses = [str(m_nu)] * num_nu_masses
+            params_dict['m_ncdm'] = ','.join(masses)
+        else:
+            params_dict['m_ncdm'] = m_nu
+    return params_dict
 
 
 # ---------- binning ---------- 

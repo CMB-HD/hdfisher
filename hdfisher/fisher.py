@@ -907,8 +907,6 @@ class FisherData:
 
 
 
-# TODO: update note about H0 vs theta in docstring 
-
 class Fisher(FisherData):
     """Calculate new Fisher derivatives and matrices from the mock CMB
     and BAO covariance matrices provided with `hdfisher`.
@@ -1703,11 +1701,9 @@ class Fisher(FisherData):
         --------
         dataconfig.Data.load_example_hd_fisher
         """
-        # TODO:
-        if self.use_class:
-            raise NotImplementedError
         fisher_matrix, fisher_params = self.data.load_example_hd_fisher(cmb_type=cmb_type, 
                                                                         use_H0=use_H0, 
-                                                                        with_desi=with_desi)
+                                                                        with_desi=with_desi,
+                                                                        use_class=self.use_class)
         return fisher_matrix, fisher_params
 
