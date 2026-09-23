@@ -510,6 +510,7 @@ def get_class_spectra(class_params, lmax, class_results=None, raw_cl=True,
 
     # calculate spectra:
     ells = np.arange(lmax + 1)
+    class_cls = {}
     unlensed_cls = class_results.raw_cl(lmax)
     if 'unlensed' in cmb_types:
         class_cls['unlensed'] = unlensed_cls
@@ -857,7 +858,7 @@ class Theory:
             if self.results is None:
                 self.get_results(save=save)
             if self.use_class:
-                rs_dv = get_class_rs_dv(self.results, zs)
+                rs_dv = get_class_bao_rs_dv(self.results, zs)
             else:
                 rs_dv = get_camb_bao_rs_dv(self.camb_params, zs, camb_results=self.results)
             if save:
