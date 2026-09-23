@@ -238,7 +238,7 @@ def _warn_about_class_lmax(class_params, max_lmax=14000):
 
 def _warn_about_class_Neff(class_params, min_Neff=3.0396):
     N_ur = class_params.get('N_ur')
-    N_eff = class_params.get('Neff')
+    Neff = class_params.get('Neff')
     param_name = None
     param_val = None
     min_val = None
