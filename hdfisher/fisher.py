@@ -1097,6 +1097,13 @@ class Fisher(FisherData):
         params_saved = os.path.exists(self.param_file_name())
         if (param_file is None) and params_saved and (not self.overwrite):
             param_file = self.param_file_name()
+            if fiducial_params is None:
+                warnings.warn("Loading the previously-saved parameter file "
+                              f"from {param_file}, so the `feedback` "
+                              "and `use_class` flags will be ignored. If "
+                              "this is not what you are intending, then you "
+                              "must either pass a new `fisher_dir` or pass "
+                              "`overwrite=True` when initializing Fisher.")
         params = theory.get_param_dict(param_dict_or_file=fiducial_params, use_fiducial=False,
                                       use_class=self.use_class, param_file=param_file)
         if params is None:
@@ -1113,6 +1120,13 @@ class Fisher(FisherData):
         step_sizes_saved = os.path.exists(self.step_sizes_file_name())
         if (fisher_steps_file is None) and step_sizes_saved and (not self.overwrite):
             fisher_steps_file = self.step_sizes_file_name()
+            if step_sizes is None:
+                warnings.warn("Loading the previously-saved parameter step "
+                              f"sizes from {fisher_steps_file}, so the "
+                              "`feedback` and `use_class` flags will be ignored. "
+                              "If this is not what you want, then you must "
+                              "either pass a new `fisher_dir` or pass "
+                              "`overwrite=True` when initializing Fisher.")
         step_sizes = get_step_sizes_dict(steps_dict_or_file=step_sizes,
                                          use_fiducial=True,
                                          use_class=self.use_class,
