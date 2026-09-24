@@ -239,35 +239,6 @@ class Data:
 
     # ----- functions that resturn file names of data: -----
 
-    # TODO : remove this?
-    #def fiducial_param_file(self, feedback=False):
-    #    """Absolute path to the YAML file holding the fiduical parameters
-    #    (including cosmological and accuracy parameters) passed to CAMB
-    #    when calculating the CMB and BAO theory.
-
-    #    Parameters
-    #    ----------
-    #    feedback : bool, default=False
-    #        If `True`, the parameter file sets the CAMB `halofit_version`
-    #        to `mead2020_feedback`, i.e. uses the HMCode 2020 + baryonic
-    #        feedback non-linear model. Otherwise, the HMCode 2016
-    #        CDM-only model is used by setting `halofit_version` to
-    #        `mead2016`.
-
-    #    Returns
-    #    -------
-    #    fname : str
-    #        The absolute path to the file.
-
-    #    See Also
-    #    --------
-    #    config.fiducial_param_file
-    #    """
-    #    fname = config.fiducial_param_file(feedback=feedback,
-    #                                       hd_data_version=self.hd_data_version)
-    #    return fname
-
-
     def fiducial_fisher_steps_file(self, use_class=False):
         """Absolute path to the YAML file holding the fiduical parameter
         step sizes used to calculate the Fisher matrices.
