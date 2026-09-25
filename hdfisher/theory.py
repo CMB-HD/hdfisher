@@ -138,12 +138,15 @@ def set_cosmo_params(params=None, use_H0=False, use_class=False,
     p = {**params_dict, **cosmo_params}
     p = utils.remove_param_aliases(p, use_class=use_class)
     # if both H0 and theta are specified, can only provide one
-    if use_H0:
-        p.pop('cosmomc_theta', None)
-        p.pop('theta_s_100', None)
-    else:
-        p.pop('H0', None)
-        p.pop('h', None)
+    has_H0 = ('H0' in p) or ('h' in p)
+    has_theta = ('cosmomc_theta' in p) or ('theta_s_100' in p)
+    if has_H0 and has_theta:
+        if use_H0:
+            p.pop('cosmomc_theta', None)
+            p.pop('theta_s_100', None)
+        else:
+            p.pop('H0', None)
+            p.pop('h', None)
     return p
 
 
