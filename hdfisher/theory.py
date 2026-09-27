@@ -108,7 +108,8 @@ def set_cosmo_params(params=None, use_H0=False, use_class=False,
         set of fiducial parameters is used.
     use_H0 : bool, default=False
         Whether to use the Hubble constant instead of `cosmomc_theta`
-        (for CAMB) or `theta_s_100` (for CLASS).
+        (for CAMB) or `theta_s_100` (for CLASS), if both are included in
+        the parameter dictionary or file.
     use_class : bool, default=False
         Whether to use CLASS instead of CAMB.
     **cosmo_params : dict of float
@@ -615,7 +616,6 @@ def get_residual_lensing(cl, nl, lmin, lmax, lmax_calc):
     lmax_calc : int
         The maximum multipole to use for the output residual lensing power.
 
-
     Returns
     -------
     cl_res : array_like of float
@@ -709,10 +709,13 @@ class Theory:
         spectra are in C_ell's (i.e., no factor of ell * (ell + 1) / (2 * pi)
         applied), in units of uK^2.
 
-        CLASS does not calculate delensed power spectra.
-        """
-        # TODO: add another note to docstring about CLASS modifications
+        NOTE that CLASS must be modified when using the fiducial CMB-HD
+        CLASS parameters; see Appendix A of Cheslog et. al. (2026) or the
+        `hdfisher` "README" file for more information and modification
+        instructions.
 
+        Also note that CLASS does not calculate delensed power spectra.
+        """
         self.lmax = int(lmax)
         self.ells = np.arange(self.lmax+1) 
         

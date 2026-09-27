@@ -414,8 +414,18 @@ def remove_camb_param_aliases(params_dict):
     return params_dict
 
 
-# TODO: docstring
 def add_class_param_aliases(params_dict, replace=True):
+    """Add the `hdfisher` parameter "aliases" to a dictionary of CLASS
+    parameters; these aliases are:
+    - `sum_m_ncdm` for the sum of neutrino masses (eV) instead of
+      `m_ncdm`. Two additional non-CLASS parameters, `num_massive_nu` and
+      `num_nu_masses`, are also added; these are only used to re-calculate
+      `m_ncdm` later.
+    Note that, by default, `hdfisher` varies these "aliases" instead of
+    the parameters being replaced.
+
+    If `replace=True`, `'m_ncdm'` will be removed from the dictionary.
+    """
     m_ncdm = params_dict.get('m_ncdm', None)
     if m_ncdm is not None:
         # add a key for the sum of the neutrino masses,
@@ -443,8 +453,13 @@ def add_class_param_aliases(params_dict, replace=True):
     return params_dict
 
 
-# TODO: docstring
 def remove_class_param_aliases(params_dict):
+    """Remove the `hdfisher` parameter "aliases" from a dictionary of
+    CLASS parameters, replacing them with the parameter(s) that can be
+    passed to CLASS:
+    - Replaces `'sum_m_ncdm'` with `'m_ncdm`', and removes
+      `'num_massive_nu'` and `'num_nu_masses'`.
+    """
     num_massive_nu = params_dict.pop('num_massive_nu', 1)
     num_nu_masses = params_dict.pop('num_nu_masses', 1)
     sum_m_ncdm = params_dict.pop('sum_m_ncdm', None)
@@ -528,7 +543,7 @@ def nbins_per_spectrum(ell_ranges, bin_edges):
     return nbins
 
 
-def binning_matrix(bin_edges, lmin=None, lmax=None, start_at_ell=0):
+def binning_matrix(bin_edges, lmin=None, lmax=None, start_at_ell=2):
     """Create a (num_bins, num_ells) binning matrix, which will bin the values
     between `lmin` and `lmax` in a vector/matrix containing values for each 
     multipole between the `start_at_ell` and `lmax` values. For example, for
@@ -546,8 +561,14 @@ def binning_matrix(bin_edges, lmin=None, lmax=None, start_at_ell=0):
         i.e. only values between `lmin` and `lmax` will be binned. If `lmin` is 
         `None`, we use the first value in the `bin_edges` array; if `lmax` 
         is `None`, we use the last value in the `bin_edges` array.
-    start_at_ell : int, default=0
-        The minimum multipole value in the quantity to be binned, which
+    start_at_ell : int, default=2
+        The minimum multipole value in the quantity to be binned. This is
+        typically either `0` or `2`.
+
+    Returns
+    -------
+    binmat : array of float
+        The two-dimensional binning matrix of shape (num_bins, num_ells).
     """
     lmin = int(lmin) if (lmin is not None) else int(bin_edges[0])
     lmax = int(lmax) if (lmax is not None) else int(bin_edges[-1])
@@ -665,14 +686,15 @@ def bin_theo_dict(ells, theo, bin_edges, lmin=None, lmax=None, ell_ranges=None):
         ell_ranges = {s: [lmin, lmax] for s in theo.keys()}
     else:
         # get min, max ell out of all ranges
-        ell_min = min([ell_ranges[s][0] for s in ell_ranges.keys()])
-        ell_max = max([ell_ranges[s][1] for s in ell_ranges.keys()])
+        lmin = min([ell_ranges[s][0] for s in ell_ranges.keys()])
+        lmax = max([ell_ranges[s][1] for s in ell_ranges.keys()])
         for s in theo.keys():
             if s not in ell_ranges:
-                ell_ranges[s] = [ell_min, ell_max]
+                ell_ranges[s] = [lmin, lmax]
     binned_theo = {}
+    binned_ells, _ = bin1d(ells, ells, bin_edges, lmin=lmin, lmax=lmax)
     for s in theo.keys():
-        binned_ells, binned_theo[s] = bin1d(ells, theo[s], bin_edges, lmin=ell_ranges[s][0], lmax=ell_ranges[s][1])
+        _, binned_theo[s] = bin1d(ells, theo[s], bin_edges, lmin=ell_ranges[s][0], lmax=ell_ranges[s][1])
     return binned_ells, binned_theo
 
 

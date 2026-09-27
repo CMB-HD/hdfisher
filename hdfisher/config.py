@@ -46,7 +46,7 @@ def fiducial_params(feedback=False, use_class=False,
     `'As'` is replaced by `'logA'`, since `logA` is the parameter varied
     by default in `hdfisher`).
     """
-    hd_datalib = hd_data.HDMockData()
+    hd_datalib = hd_data.HDMockData(version=hd_data_version)
     if use_class:
         params = hd_datalib.class_settings(baryonic_feedback=feedback)
         H0 = hd_datalib.class_settings(baryonic_feedback=feedback, use_H0=True)['H0']

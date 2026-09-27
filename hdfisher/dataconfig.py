@@ -110,10 +110,10 @@ def load_precomputed_desi_fisher(use_H0=False):
 
 
 class Data:
-    """Holds the experimental configuration information for CMB-HD, along 
-    with for the experiments considered in MacInnis et. al. (2023), and 
+    """Holds the experimental configuration information for CMB-HD, and 
+    for the experiments considered in MacInnis et. al. (2023). Also
     defines methods to access to the associated files provided with 
-    `hdfisher`.
+    `hdfisher`, or to the necessary files in `hdMockData`.
     """
     cmb_exps = ['so', 's4', 'hd']
     # CMB and lensing theory spectra:
@@ -281,9 +281,8 @@ class Data:
             lensed CMB spectra instead of delensed.
         use_H0: bool, default=False
             If `True`, the Hubble constant is used as one of the six LCDM
-            parameters. If `False`, the cosmoMC approximation to the
-            angular scale of the sound horizon at last scattering
-            (multiplied by 100) is used instead.
+            parameters. If `False`, the angular scale of the sound horizon
+            at last scattering (multiplied by 100) is used instead.
         with_desi : bool, default=False
             If `False`, the Fisher matrix was calculated using only CMB
             spectra. If `True`, the Fisher matrix is the sum of a CMB and
@@ -305,10 +304,16 @@ class Data:
         --------
         load_example_hd_fisher
         """
-        # TODO:
-        if use_class:
-            raise NotImplementedError
         cmb_type = cmb_type.lower()
+        if use_class:
+            # check if CLASS is an option for this version of HD mock data:
+            self.hd_datalib.get_compatible_version(self.hd_datalib.class_theo_versions,
+                                                   'mock CMB-HD data for CLASS')
+            if cmb_type == 'delensed':
+                raise ValueError(f"`{cmb_type=}` and `{use_class=}`. There are"
+                                 " no delensed Fisher matrices available for"
+                                 " CLASS. You must either pass"
+                                 " `use_class=False` or `cmb_type='lensed'`.")
         if cmb_type not in self.cov_cmb_types['hd']:
             raise ValueError(f"Invalid `{cmb_type = }`. The options are:"
                              f" {self.cov_cmb_types['hd']}")
@@ -320,6 +325,8 @@ class Data:
         H0_info = '_useH0' if use_H0 else ''
         desi_info = '_desi_bao' if with_desi else ''
         fname_root = f'hd_fsky0pt6_{ell_info}_{cmb_type}{desi_info}{H0_info}'
+        if use_class:
+            fname_root = f'{fname_root}_withCLASS'
         version = self.hd_data_version
         fisher_dir = os.path.join(config.data_path(f'fisher_matrices'), 'hd_examples')
         fname = os.path.join(fisher_dir, f'{fname_root}_fisher_{version}.txt')
@@ -939,9 +946,8 @@ class Data:
               `'delensed'`.
         use_H0: bool, default=False
             If `True`, the Hubble constant is used as one of the six LCDM
-            parameters. If `False`, the cosmoMC approximation to the
-            angular scale of the sound horizon at last scattering
-            (multiplied by 100) is used instead.
+            parameters. If `False`, the angular scale of the sound horizon
+            at last scattering (multiplied by 100) is used instead.
         with_desi : bool, default=False
             If `False`, the Fisher matrix was calculated using only CMB
             spectra. If `True`, the Fisher matrix is the sum of a CMB and
@@ -1071,9 +1077,8 @@ class Data:
             lensed CMB spectra instead of delensed.
         use_H0: bool, default=False
             If `True`, the Hubble constant is used as one of the six LCDM
-            parameters. If `False`, the cosmoMC approximation to the
-            angular scale of the sound horizon at last scattering
-            (multiplied by 100) is used instead.
+            parameters. If `False`, the angular scale of the sound horizon
+            at last scattering (multiplied by 100) is used instead.
         with_desi : bool, default=False
             If `False`, the Fisher matrix was calculated using only CMB
             spectra. If `True`, the Fisher matrix is the sum of a CMB and
@@ -1719,9 +1724,8 @@ class Data:
               `'delensed'`.
         use_H0: bool, default=False
             If `True`, the Hubble constant is used as one of the six LCDM
-            parameters. If `False`, the cosmoMC approximation to the
-            angular scale of the sound horizon at last scattering
-            (multiplied by 100) is used instead.
+            parameters. If `False`, the angular scale of the sound horizon
+            at last scattering (multiplied by 100) is used instead.
         with_desi : bool, default=False
             If `False`, the Fisher matrix was calculated using only CMB
             spectra. If `True`, the Fisher matrix is the sum of a CMB and
@@ -1880,8 +1884,9 @@ class Data:
             available parameters are included.
         feedback : bool, default=None
             If `True`, the dictionary will contain the name of the 
-            HMCode2020 + feedback model that is passed to CAMB, and the
-            name and fiducial value of its baryonic feedback parameter.
+            HMCode2020 + feedback model that is passed to CAMB or CLASS,
+            and the name and fiducial value of its baryonic feedback
+            parameter.
         use_class : bool, default=False
             Whether CLASS is being used instead of CAMB.
 
