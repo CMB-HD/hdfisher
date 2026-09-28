@@ -21,24 +21,6 @@ class FakeMPIComm:
     def barrier(self):
         pass
 
-    def Abort(self, **kwargs):
-        pass
-
-    def send(self, obj, dest, **kwargs):
-        # but store whatever is being sent, and receive it later
-        self.obj = deepcopy(obj)
-
-    def recv(self, **kwargs):
-        return self.obj
-
-    def gather(self, sendobj, **kwargs):
-        return [sendobj]
-
-    def bcast(self, sendobj, **kwargs):
-        return sendobj
-
-    def Bcast(self, sendobj, **kwargs):
-        pass
 
 
 
