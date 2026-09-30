@@ -2,7 +2,7 @@
 
 This repository contains software to produce Fisher forecasts for CMB-HD. If you use this code, please cite:
 - [MacInnis, Sehgal, and Rothermel (2023)](https://arxiv.org/abs/2309.03021)
-- If you use CLASS, please also cite [Cheslog, Finson, MacInnis, Sehgal, Afshordi, Nerval, and Hložek (2026)](https://arxiv.org/abs/XXXX.XXXXX)
+- If you use CLASS, please also cite [Cheslog, Finson, MacInnis, Sehgal, Afshordi, Nerval, and Hložek (2026)](https://arxiv.org/abs/2609.35964)
 - If you use the CMB-HD mock data, please also cite the appropriate references given in the [`hdMockData` repository](https://github.com/CMB-HD/hdMockData#forecasting-data-for-cmb-hd) for the mock data version used (the latest version by default)
 
 
@@ -90,7 +90,7 @@ The instructions are given in Appendix A of Cheslog et. al. (2026) and repeated 
     ```
   This is necessary in order to vary `Neff` below approximately 3.0396 (or, equivalently, the `N_ur` parameter below zero) with three massive neutrinos (`N_ncdm=3`). 
   
-- In order to use the default `sBBN file` used by `hdfisher` (available [here](https://github.com/CMB-HD/hdMockData/blob/main/hd_mock_data/data/theory/PRIMAT_Yp_DH_ErrorMC_2021_CLASS.dat), which is a copy of the corresponding file provided by [CAMB](https://github.com/cmbant/CAMB/blob/master/camb/PRIMAT_Yp_DH_ErrorMC_2021.dat)that has been formatted for CLASS), you *must* place a copy of that file in the `$CLASS_DIR/external/bbn/` directory. You may copy it over yourself, or follow these instructions:
+- In order to use the default `sBBN file` used by `hdfisher` (available [here](https://github.com/CMB-HD/hdMockData/blob/main/hd_mock_data/data/theory/PRIMAT_Yp_DH_ErrorMC_2021_CLASS.dat), which is a copy of the corresponding file provided by [CAMB](https://github.com/cmbant/CAMB/blob/master/camb/PRIMAT_Yp_DH_ErrorMC_2021.dat) that has been formatted for CLASS), you *must* place a copy of that file in the `$CLASS_DIR/external/bbn/` directory. You may copy it over yourself, or follow these instructions:
 
   First, make sure that `hd_mock_data` has been correctly installed by running the command `python -c "from hd_mock_data import hd_data` . If nothing happens, you may proceed; otherwise, follow the instructions above to install `hd_mock_data`. 
   
