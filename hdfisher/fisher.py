@@ -128,7 +128,7 @@ def get_param_info(params, param_step_sizes, use_class=False):
         else:
             step = step_info[param]['step_size']
             if 'rel' in step_info[param]['step_type'].lower():
-                step *= fids[param]
+                step *= abs(fids[param])
             step_sizes[param] = step
     # make sure there are no duplicate parameters:
     fids = _remove_duplicate_params(fids, step_sizes)

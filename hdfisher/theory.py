@@ -1004,7 +1004,7 @@ class Theory:
         # if not overwriting, check if we already have all the spectra, or if its saved
         if all([s in self.theo['delensed'] for s in self.cmb_spectra + ['kk']]) and (not overwrite):
             delensed_theo = self.theo['delensed'].copy()
-        if os.path.exists(fname) and (not overwrite): # load it
+        elif os.path.exists(fname) and (not overwrite): # load it
             print(f"loading delensed theory from {fname}")
             delensed_theo = utils.load_from_file(fname, config.theo_cols)
         else: # calculate it
